@@ -157,6 +157,15 @@ function setStatus(node, text, cls) {
   node.textContent = text;
 }
 
+// индикатор моста Tampermonkey
+SwgohApi.bridge.onReady(() => {
+  const st = $('#bridge-state');
+  st.textContent = 'активен ✓';
+  st.style.color = 'var(--green)';
+  $('#bridge-install-help').classList.add('hidden');
+  $('#bridge-hint').classList.add('ok');
+});
+
 $('#guild-url').addEventListener('input', updateManualGuildLink);
 function updateManualGuildLink() {
   const id = SwgohApi.parseGuildId($('#guild-url').value) || 'ID_ГИЛЬДИИ';

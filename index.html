@@ -35,6 +35,18 @@
       </div>
       <div id="guild-load-status" class="status hidden"></div>
 
+      <div id="bridge-hint" class="status">
+        🔌 Мост браузера: <b id="bridge-state">не установлен</b>.
+        <span id="bridge-install-help">swgoh.gg закрыт Cloudflare, поэтому автозагрузка без моста почти всегда не работает.
+        Установка (один раз, ~2 минуты):
+        <ol>
+          <li>Поставьте расширение <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a></li>
+          <li>Нажмите: <a href="swgoh_bridge.user.js">установить скрипт-мост</a> → в открывшемся окне Tampermonkey нажмите «Установить»</li>
+          <li>Обновите эту страницу — статус сменится на «активен»</li>
+        </ol>
+        </span>
+      </div>
+
       <details id="manual-import" class="manual-import">
         <summary>Ручной импорт (если автозагрузка не сработала)</summary>
         <ol>

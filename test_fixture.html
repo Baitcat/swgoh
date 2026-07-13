@@ -44,6 +44,20 @@ const p2 = playerJson('Bravo', 222222222, [
 ]);
 // прогоняем через реальный код приложения: заполняем поля ручного импорта после загрузки
 window.__TEST__ = { guildJson, players: [p1, p2] };
+
+// эмуляция юзерскрипта-моста (swgoh_bridge.user.js): отвечает на ping и fetch
+window.addEventListener('message', ev => {
+  if (!ev.data) return;
+  if (ev.data.type === 'swgoh-bridge-ping') {
+    window.postMessage({ type: 'swgoh-bridge-ready', version: 'test' }, '*');
+  } else if (ev.data.type === 'swgoh-bridge-fetch') {
+    const ok = ev.data.url.startsWith('https://swgoh.gg/api/guild-profile/');
+    window.postMessage({
+      type: 'swgoh-bridge-result', id: ev.data.id,
+      status: 200, text: JSON.stringify(ok ? guildJson : p1),
+    }, '*');
+  }
+});
 </script>
 <script src="data/tb_data.js"></script>
 <script src="js/api.js"></script>
@@ -58,9 +72,9 @@ window.__TEST__ = { guildJson, players: [p1, p2] };
   const s = document.createElement('script');
   s.src = 'js/app.js';
   s.onload = () => {
-    // ручной импорт гильдии через UI-обработчики
-    document.getElementById('manual-guild-json').value = JSON.stringify(window.__TEST__.guildJson);
-    document.getElementById('btn-manual-guild').click();
+    // автозагрузка гильдии через мост (эмулированный выше)
+    document.getElementById('guild-url').value = 'https://swgoh.gg/g/HWTOggWMSD6t06XEYD924w/';
+    document.getElementById('btn-load-guild').click();
     document.getElementById('manual-player-json').value = window.__TEST__.players.map(p => JSON.stringify(p)).join('\n');
     document.getElementById('btn-manual-player').click();
     // переключение вкладки по параметру ?tab=
