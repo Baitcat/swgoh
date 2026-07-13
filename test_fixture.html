@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>TEST</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="orig"></div>
+<script>
+// --- фикстуры: имитация JSON swgoh.gg ---
+const guildJson = {
+  data: {
+    guild_id: 'TESTGUILDID123',
+    name: 'Тестовая Гильдия',
+    galactic_power: 2400000000,
+    member_count: 8,
+    members: [
+      { player_name: 'Alpha',  ally_code: 111111111, galactic_power: 11000000, character_galactic_power: 6000000, ship_galactic_power: 5000000 },
+      { player_name: 'Bravo',  ally_code: 222222222, galactic_power: 9500000,  character_galactic_power: 5000000, ship_galactic_power: 4500000 },
+      { player_name: 'Charlie',ally_code: 333333333, galactic_power: 8000000,  character_galactic_power: 4200000, ship_galactic_power: 3800000 },
+      { player_name: 'Delta',  ally_code: 444444444, galactic_power: 7000000,  character_galactic_power: 3600000, ship_galactic_power: 3400000 },
+      { player_name: 'Echo',   ally_code: 555555555, galactic_power: 6000000,  character_galactic_power: 3100000, ship_galactic_power: 2900000 },
+      { player_name: 'Foxtrot',ally_code: 666666666, galactic_power: 5500000,  character_galactic_power: 2900000, ship_galactic_power: 2600000 },
+      { player_name: 'Golf',   ally_code: 777777777, galactic_power: 5000000,  character_galactic_power: 2700000, ship_galactic_power: 2300000 },
+      { player_name: 'Hotel',  ally_code: 888888888, galactic_power: 4200000,  character_galactic_power: 2300000, ship_galactic_power: 1900000 },
+    ],
+  },
+};
+function playerJson(name, ally, units) {
+  return { data: { name, ally_code: ally }, units: units.map(u => ({ data: u })) };
+}
+const p1 = playerJson('Alpha', 111111111, [
+  { name: 'Darth Traya', combat_type: 1, relic_tier: 9, rarity: 7 },   // R7
+  { name: 'Emperor Palpatine', combat_type: 1, relic_tier: 11, rarity: 7 }, // R9
+  { name: 'Chimaera', combat_type: 2, rarity: 7 },
+  { name: "Hound's Tooth", combat_type: 2, rarity: 7 },
+  { name: 'Darth Revan', combat_type: 1, relic_tier: 7, rarity: 7 },   // R5
+]);
+const p2 = playerJson('Bravo', 222222222, [
+  { name: 'Darth Traya', combat_type: 1, relic_tier: 7, rarity: 7 },   // R5
+  { name: 'Chimaera', combat_type: 2, rarity: 6 },                      // не 7*
+  { name: 'General Grievous', combat_type: 1, relic_tier: 9, rarity: 7 },
+]);
+// прогоняем через реальный код приложения: заполняем поля ручного импорта после загрузки
+window.__TEST__ = { guildJson, players: [p1, p2] };
+</script>
+<script src="data/tb_data.js"></script>
+<script src="js/api.js"></script>
+<!-- разметка приложения подгружается из index.html -->
+<script>
+(async () => {
+  const html = await fetch('index.html').then(r => r.text()).catch(() => null);
+  if (html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    document.getElementById('orig').replaceWith(doc.querySelector('header'), doc.querySelector('main'), doc.querySelector('footer'));
+  }
+  const s = document.createElement('script');
+  s.src = 'js/app.js';
+  s.onload = () => {
+    // ручной импорт гильдии через UI-обработчики
+    document.getElementById('manual-guild-json').value = JSON.stringify(window.__TEST__.guildJson);
+    document.getElementById('btn-manual-guild').click();
+    document.getElementById('manual-player-json').value = window.__TEST__.players.map(p => JSON.stringify(p)).join('\n');
+    document.getElementById('btn-manual-player').click();
+    // переключение вкладки по параметру ?tab=
+    const tab = new URLSearchParams(location.search).get('tab');
+    if (tab) document.querySelector(`[data-tab="${tab}"]`).click();
+    document.title = 'TEST-READY';
+  };
+  document.body.append(s);
+})();
+</script>
+</body>
+</html>

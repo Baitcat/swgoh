@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SWGOH — Планировщик ТБ Rise of the Empire</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌌</text></svg>">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <h1>🌌 ТБ: Rise of the Empire — планировщик</h1>
+    <div id="guild-badge" class="guild-badge hidden"></div>
+  </div>
+  <nav class="tabs" id="main-tabs">
+    <button class="tab active" data-tab="guild">Гильдия</button>
+    <button class="tab" data-tab="phases">Фазы</button>
+    <button class="tab" data-tab="planner">Планировщик</button>
+    <button class="tab" data-tab="platoons">Платуны</button>
+    <button class="tab" data-tab="specials">Спецмиссии</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ===================== GUILD TAB ===================== -->
+  <section id="tab-guild" class="tab-panel active">
+    <div class="card">
+      <h2>Загрузка гильдии</h2>
+      <p class="muted">Вставьте ссылку на гильдию swgoh.gg или её ID, например:
+        <code>https://swgoh.gg/g/HWTOggWMSD6t06XEYD924w/</code></p>
+      <div class="row">
+        <input type="text" id="guild-url" placeholder="Ссылка или ID гильдии" spellcheck="false">
+        <button id="btn-load-guild" class="primary">Загрузить</button>
+      </div>
+      <div id="guild-load-status" class="status hidden"></div>
+
+      <details id="manual-import" class="manual-import">
+        <summary>Ручной импорт (если автозагрузка не сработала)</summary>
+        <ol>
+          <li>Откройте в новой вкладке: <a id="manual-guild-link" href="#" target="_blank" rel="noopener">ссылка на API гильдии</a></li>
+          <li>Скопируйте весь текст со страницы (Ctrl+A, Ctrl+C)</li>
+          <li>Вставьте его в поле ниже и нажмите «Импортировать»</li>
+        </ol>
+        <textarea id="manual-guild-json" placeholder='{"data": {...}, "members": ...}' rows="5"></textarea>
+        <button id="btn-manual-guild" class="primary">Импортировать</button>
+      </details>
+    </div>
+
+    <div id="guild-content" class="hidden">
+      <div class="card">
+        <div class="card-head">
+          <h2 id="guild-title"></h2>
+          <div class="actions">
+            <button id="btn-refresh-guild" title="Обновить данные гильдии">⟳ Обновить</button>
+            <button id="btn-load-rosters" class="primary" title="Загрузить ростеры всех игроков для проверки платунов">Загрузить ростеры игроков</button>
+            <button id="btn-clear-all" class="danger" title="Удалить все сохранённые данные">Сбросить всё</button>
+          </div>
+        </div>
+        <div id="guild-stats" class="stat-row"></div>
+        <div id="roster-progress" class="status hidden"></div>
+        <details id="roster-manual" class="manual-import hidden">
+          <summary>Ручной импорт ростеров</summary>
+          <p class="muted">Откройте ссылку игрока, скопируйте JSON и вставьте сюда (можно несколько JSON подряд — каждый с новой строки).</p>
+          <div id="roster-links" class="roster-links"></div>
+          <textarea id="manual-player-json" rows="5" placeholder='{"data": {...}, "units": [...]}'></textarea>
+          <button id="btn-manual-player" class="primary">Импортировать ростер(ы)</button>
+        </details>
+        <table class="table" id="members-table">
+          <thead>
+            <tr>
+              <th data-sort="name">Игрок</th>
+              <th data-sort="gp" class="num">ГП всего</th>
+              <th data-sort="charGp" class="num">ГП персонажи</th>
+              <th data-sort="shipGp" class="num">ГП флот</th>
+              <th class="num">Ростер</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== PHASES TAB ===================== -->
+  <section id="tab-phases" class="tab-panel">
+    <div id="phases-overview"></div>
+  </section>
+
+  <!-- ===================== PLANNER TAB ===================== -->
+  <section id="tab-planner" class="tab-panel">
+    <div class="card">
+      <div class="card-head">
+        <h2>Распределение по зонам</h2>
+        <div class="actions">
+          <button id="btn-auto-distribute">⚙ Авторазложить фазу</button>
+          <button id="btn-copy-plan">📋 Скопировать план фазы</button>
+          <button id="btn-export-plan">⤓ Экспорт плана</button>
+          <label class="file-btn">⤒ Импорт плана<input type="file" id="import-plan-file" accept=".json"></label>
+        </div>
+      </div>
+      <div class="phase-picker" id="planner-phase-picker"></div>
+      <p class="muted">Каждый игрок в фазе несёт весь свой ГП (персонажи + флот) в одну зону.
+        Очки зоны = деплой + очки боевых миссий, поэтому реальный результат будет выше чистого деплоя.</p>
+      <div id="planner-zones" class="zones-grid"></div>
+      <div class="card-sub">
+        <h3>Игроки <span class="muted" id="planner-unassigned-info"></span></h3>
+        <table class="table" id="planner-table">
+          <thead>
+            <tr><th>Игрок</th><th class="num">ГП</th><th>Зона</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== PLATOONS TAB ===================== -->
+  <section id="tab-platoons" class="tab-panel">
+    <div class="card">
+      <div class="card-head">
+        <h2>Платуны (операции)</h2>
+      </div>
+      <div class="phase-picker" id="platoons-phase-picker"></div>
+      <div class="phase-picker" id="platoons-planet-picker"></div>
+      <div id="platoons-content"></div>
+    </div>
+  </section>
+
+  <!-- ===================== SPECIALS TAB ===================== -->
+  <section id="tab-specials" class="tab-panel">
+    <div class="card">
+      <h2>Специальные и боевые миссии</h2>
+      <div id="specials-content"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p class="muted">Данные по фазам: <a href="https://genskaar.github.io/tb_empire/html/main.html" target="_blank" rel="noopener">genskaar/tb_empire</a> ·
+  Данные игроков: <a href="https://swgoh.gg" target="_blank" rel="noopener">swgoh.gg</a> ·
+  Все данные хранятся локально в вашем браузере.</p>
+</footer>
+
+<script src="data/tb_data.js"></script>
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
