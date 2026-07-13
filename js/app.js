@@ -28,7 +28,9 @@ function relicReq(planet) {
 /* ---------------- Состояние ---------------- */
 
 const store = {
-  guild: load('tbp_guild'),     // {id, name, gp, memberCount, members:[{name, allyCode, gp, charGp, shipGp}], loadedAt}
+  // {id, name, gp, memberCount, members:[{name, allyCode, gp, charGp, shipGp}], loadedAt}
+  // если гильдия ещё не загружалась, берём вшитую (data/guild_seed.js)
+  guild: load('tbp_guild') || window.GUILD_SEED || null,
   rosters: load('tbp_rosters') || {}, // {allyCode: {t, name, units:{norm:{r,s,c}}}}
   plan: load('tbp_plan') || {},       // {phase: {allyCode: planetKey}}
 };
