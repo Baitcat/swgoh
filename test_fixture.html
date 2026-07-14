@@ -33,12 +33,12 @@ function playerJson(name, ally, units, gps) {
 // проверка синхронизации ГП: у гильдии нет разбивки по персонажам/флоту, берём из ростера
 window.__GP1 = { galactic_power: 330000000, character_galactic_power: 180000000, ship_galactic_power: 150000000 };
 window.__GP2 = { galactic_power: 285000000, character_galactic_power: 155000000, ship_galactic_power: 130000000 };
-// план фазы 1 (кумулятивная логика): Mustafar и Corellia будут закрыты на 3★, Coruscant — перенос
+// план фазы 1: Мустафар 3★ (закрыт), Корусант 1★+перенос, Кореллия 0★ →
+// в фазе 2 Фелуция (смешанный путь) должна быть 🔒 заблокирована
 localStorage.setItem('tbp_plan', JSON.stringify({
   1: {
     '111111111': 'mustafar', '222222222': 'mustafar',   // 615 млн > 248,3 млн → 3★
-    '333333333': 'corellia',                            // 240 млн > 238,3 млн → 3★
-    '444444444': 'coruscant',                           // 210 млн из 248,3 млн → перенос 84%
+    '333333333': 'coruscant',                           // 240 млн → 1★..2★, перенос
   },
   2: { '555555555': 'geonosis', '666666666': 'coruscant' },
 }));

@@ -9,6 +9,20 @@ const PHASES = [1, 2, 3, 4, 5, 6];
 const ALIGN_RU = { dark: 'Тёмная', light: 'Светлая', mixed: 'Смешанная' };
 const ALIGN_ICON = { dark: '🔴', light: '🔵', mixed: '🟣' };
 
+// русские названия планет
+const RU_NAMES = {
+  mustafar: 'Мустафар', corellia: 'Кореллия', coruscant: 'Корусант',
+  geonosis: 'Джеонозис', felucia: 'Фелуция', bracca: 'Бракка',
+  dathomir: 'Датомир', tatooine: 'Татуин', kashyyyk: 'Кашиик',
+  haven: 'Мед. станция «Хейвен»', kessel: 'Кессель', lothal: 'Лотал',
+  malachor: 'Малакор', vandor: 'Вандор', kafrene: 'Кольцо Кафрены',
+  deathstar: 'Звезда Смерти', hoth: 'Хот', scarif: 'Скариф',
+  zeffo: 'Зеффо', mandalore: 'Мандалор',
+};
+for (const p of Object.values(TB.planets)) {
+  if (RU_NAMES[p.key]) p.displayName = RU_NAMES[p.key];
+}
+
 // планеты по фазам
 const planetsByPhase = {};
 for (const p of Object.values(TB.planets)) {
@@ -17,6 +31,17 @@ for (const p of Object.values(TB.planets)) {
 const alignOrder = { dark: 0, mixed: 1, light: 2 };
 for (const list of Object.values(planetsByPhase)) {
   list.sort((a, b) => (a.bonus - b.bonus) || (alignOrder[a.alignment] - alignOrder[b.alignment]));
+}
+
+// три пути ТБ: тёмный / смешанный / светлый, по планете на фазу
+const PATHS = { dark: [], mixed: [], light: [] };
+for (const ph of PHASES) {
+  for (const p of planetsByPhase[ph] || []) if (!p.bonus) PATHS[p.alignment].push(p);
+}
+function pathPredecessor(p) {
+  const path = PATHS[p.alignment] || [];
+  const i = path.findIndex(x => x.key === p.key);
+  return i > 0 ? path[i - 1] : null;
 }
 
 function relicReq(planet) {
@@ -419,32 +444,55 @@ function renderPhases() {
 
 let plannerPhase = 1;
 
-// В RotE планеты остаются открытыми, пока не набраны 3★: в фазе N можно
-// деплоить на любую планету фаз 1..N, очки копятся между фазами.
-function deployZones(phase) {
-  const out = [];
-  for (let f = 1; f <= phase; f++) {
-    for (const p of planetsByPhase[f] || []) if (!p.bonus) out.push(p);
-  }
-  return out;
-}
+const th = (z, star) => (z.starThresholds && z.starThresholds[star]) || Infinity;
+const th3 = z => th(z, 3);
 
-// накопленные очки по планетам: carry — из фаз до текущей, cur — в текущей
-function planetTotals(phase) {
-  const t = {};
+/* Симуляция всего ТБ по текущему плану.
+   Правила RotE:
+   — первая планета каждого пути открыта с фазы 1;
+   — следующая планета пути открывается со следующей фазы после того,
+     как на текущей планете пути взята хотя бы 1★;
+   — очки планеты копятся между фазами, пока не набраны 3★;
+   — планета с 3★ закрыта и деплой больше не принимает. */
+function simulate() {
   const g = store.guild;
-  if (!g) return t;
-  const gpByAlly = Object.fromEntries(g.members.map(m => [m.allyCode, m.gp]));
-  for (let f = 1; f <= phase; f++) {
+  const gpByAlly = g ? Object.fromEntries(g.members.map(m => [m.allyCode, m.gp])) : {};
+  const cum = {};        // key -> накопленные очки
+  const openSince = {};  // key -> фаза, с которой планета открыта
+  const star1At = {};    // key -> фаза, к концу которой взята 1★
+  for (const path of Object.values(PATHS)) if (path[0]) openSince[path[0].key] = 1;
+  const phases = {};
+  for (let f = 1; f <= 6; f++) {
+    const open = new Set();
+    for (const path of Object.values(PATHS)) {
+      for (const p of path) {
+        if (openSince[p.key] != null && openSince[p.key] <= f && (cum[p.key] || 0) < th3(p)) {
+          open.add(p.key);
+        }
+      }
+    }
+    const carry = { ...cum };
+    const cur = {};
     for (const [ac, pk] of Object.entries(store.plan[f] || {})) {
-      const rec = t[pk] = t[pk] || { carry: 0, cur: 0 };
-      rec[f < phase ? 'carry' : 'cur'] += gpByAlly[ac] || 0;
+      cur[pk] = (cur[pk] || 0) + (gpByAlly[ac] || 0);
+    }
+    phases[f] = { open, carry, cur };
+    for (const [pk, v] of Object.entries(cur)) cum[pk] = (cum[pk] || 0) + v;
+    // конец фазы: новые 1★ открывают следующие планеты путей со следующей фазы
+    for (const path of Object.values(PATHS)) {
+      for (let i = 0; i < path.length; i++) {
+        const p = path[i];
+        if (star1At[p.key] == null && (cum[p.key] || 0) >= th(p, 1)) {
+          star1At[p.key] = f;
+          if (path[i + 1] && openSince[path[i + 1].key] == null) {
+            openSince[path[i + 1].key] = f + 1;
+          }
+        }
+      }
     }
   }
-  return t;
+  return { phases, openSince, star1At, cum };
 }
-
-const th3 = z => (z.starThresholds && z.starThresholds['3']) || Infinity;
 
 function renderPlannerPicker() {
   const box = $('#planner-phase-picker');
@@ -468,9 +516,9 @@ function renderPlanner() {
     zonesBox.append(el('p', { class: 'muted' }, 'Сначала загрузите гильдию на вкладке «Гильдия».'));
     return;
   }
-  const zones = deployZones(plannerPhase);
   const assign = store.plan[plannerPhase] || {};
-  const totals = planetTotals(plannerPhase);
+  const sim = simulate();
+  const ph = sim.phases[plannerPhase];
   const counts = {};
   let unassigned = 0;
   for (const m of g.members) {
@@ -479,20 +527,38 @@ function renderPlanner() {
     else unassigned++;
   }
 
-  for (const z of zones) {
-    const t = totals[z.key] || { carry: 0, cur: 0 };
-    const total = t.carry + t.cur;
-    const closed = t.carry >= th3(z); // добита до 3★ ещё до этой фазы
-    const card = el('div', { class: 'zone-card' + (closed ? ' zone-closed' : '') });
+  // что показывать в фазе: открытые, уже закрытые (3★) и ещё не открытые планеты фаз 1..N
+  const visible = [];
+  for (let f = 1; f <= plannerPhase; f++) {
+    for (const p of planetsByPhase[f] || []) if (!p.bonus) visible.push(p);
+  }
+
+  for (const z of visible) {
+    const carry = ph.carry[z.key] || 0;
+    const cur = ph.cur[z.key] || 0;
+    const total = carry + cur;
+    const isOpen = ph.open.has(z.key);
+    const closed = carry >= th3(z); // добита до 3★ ещё до этой фазы
+    const locked = !isOpen && !closed;
+
+    const card = el('div', { class: 'zone-card' + (closed || locked ? ' zone-closed' : '') });
     card.append(el('h4', {}, [
       el('span', { class: 'align-' + z.alignment }, ALIGN_ICON[z.alignment] + ' ' + z.displayName),
       z.phase < plannerPhase ? el('span', { class: 'badge relic' }, 'с фазы ' + z.phase) : null,
       closed ? el('span', { class: 'badge bonus' }, '3★ закрыта') : null,
+      locked ? el('span', { class: 'badge bonus' }, '🔒 не открыта') : null,
     ]));
+    if (locked) {
+      const pred = pathPredecessor(z);
+      card.append(el('div', { class: 'zone-count' },
+        pred ? `Откроется в следующей фазе после 1★ на «${pred.displayName}»` : 'Недоступна'));
+      zonesBox.append(card);
+      continue;
+    }
     card.append(el('div', { class: 'zone-total' }, fmt(total)));
     card.append(el('div', { class: 'zone-count' },
-      `${counts[z.key] || 0} игроков · эта фаза: ${fmtM(t.cur)}` +
-      (t.carry ? ` · перенос: ${fmtM(t.carry)}` : '')));
+      `${counts[z.key] || 0} игроков · эта фаза: ${fmtM(cur)}` +
+      (carry ? ` · перенос: ${fmtM(carry)}` : '')));
     const bars = el('div', { class: 'star-bars' });
     for (const star of [1, 2, 3]) {
       const need = z.starThresholds && z.starThresholds[star];
@@ -515,23 +581,23 @@ function renderPlanner() {
   for (const m of g.members) {
     const sel = el('select', {
       onchange: ev => {
-        const ph = store.plan[plannerPhase] = store.plan[plannerPhase] || {};
-        if (ev.target.value) ph[m.allyCode] = ev.target.value;
-        else delete ph[m.allyCode];
+        const phPlan = store.plan[plannerPhase] = store.plan[plannerPhase] || {};
+        if (ev.target.value) phPlan[m.allyCode] = ev.target.value;
+        else delete phPlan[m.allyCode];
         savePlan();
         renderPlanner();
       },
     });
     sel.append(el('option', { value: '' }, '— не назначен —'));
-    for (const z of zones) {
-      const t = totals[z.key] || { carry: 0, cur: 0 };
-      const closed = t.carry >= th3(z);
+    for (const z of visible) {
+      const isOpen = ph.open.has(z.key);
+      const cur = assign[m.allyCode] === z.key;
+      if (!isOpen && !cur) continue; // закрытые и не открытые не предлагаем
       const opt = el('option', { value: z.key },
         ALIGN_ICON[z.alignment] + ' ' + z.displayName +
         (z.phase < plannerPhase ? ' (ф.' + z.phase + ')' : '') +
-        (closed ? ' — 3★ закрыта' : ''));
-      if (closed && assign[m.allyCode] !== z.key) opt.disabled = true;
-      if (assign[m.allyCode] === z.key) opt.selected = true;
+        (!isOpen ? ' — ⚠ недоступна' : ''));
+      if (cur) opt.selected = true;
       sel.append(opt);
     }
     tbody.append(el('tr', {}, [
@@ -547,27 +613,35 @@ function renderPlanner() {
 $('#btn-auto-distribute').addEventListener('click', () => {
   const g = store.guild;
   if (!g) return;
-  const zones = deployZones(plannerPhase);
-  if (!zones.length) return;
   if (!confirm(`Перераспределить всех игроков по зонам фазы ${plannerPhase} автоматически? Текущие назначения фазы будут заменены.`)) return;
 
-  // дефицит до 3★ с учётом очков, перенесённых из прошлых фаз
-  const totals = planetTotals(plannerPhase);
-  const targets = zones
-    .map(z => {
-      const carry = (totals[z.key] || { carry: 0 }).carry;
-      return { key: z.key, need: Math.max(0, th3(z) - carry), total: 0 };
-    })
-    .filter(t => t.need > 0 && isFinite(t.need));
-  if (!targets.length) { alert('Все доступные планеты уже закрыты на 3★.'); return; }
+  // считаем доступность без назначений текущей фазы
+  const saved = store.plan[plannerPhase];
+  delete store.plan[plannerPhase];
+  const sim = simulate();
+  const ph = sim.phases[plannerPhase];
+  if (saved) store.plan[plannerPhase] = saved;
+
+  const targets = [...ph.open].map(k => {
+    const z = TB.planets[k];
+    return { key: k, th1: th(z, 1), th3: th3(z), have: ph.carry[k] || 0 };
+  }).filter(t => t.have < t.th3 && isFinite(t.th3));
+  if (!targets.length) { alert('В этой фазе нет открытых планет для деплоя.'); return; }
+
   const assign = {};
-  const members = [...g.members].sort((a, b) => b.gp - a.gp);
-  for (const m of members) {
-    // зона с наибольшим относительным дефицитом до 3★
-    targets.sort((a, b) => (b.need - b.total) / b.need - (a.need - a.total) / a.need);
-    const t = targets[0];
+  for (const m of [...g.members].sort((a, b) => b.gp - a.gp)) {
+    // приоритет 1: добрать 1★ везде (открывает пути); приоритет 2: добивать 3★
+    let pool = targets.filter(t => t.have < t.th1);
+    let metric = t => (t.th1 - t.have) / t.th1;
+    if (!pool.length) {
+      pool = targets.filter(t => t.have < t.th3);
+      metric = t => (t.th3 - t.have) / t.th3;
+    }
+    if (!pool.length) pool = targets; // всё добито — ровняем по минимуму
+    pool.sort((a, b) => metric ? metric(b) - metric(a) : a.have - b.have);
+    const t = pool[0];
     assign[m.allyCode] = t.key;
-    t.total += m.gp;
+    t.have += m.gp;
   }
   store.plan[plannerPhase] = assign;
   savePlan();
@@ -579,16 +653,19 @@ $('#btn-auto-distribute').addEventListener('click', () => {
 $('#btn-copy-plan').addEventListener('click', async () => {
   const g = store.guild;
   if (!g) return;
-  const zones = deployZones(plannerPhase);
   const assign = store.plan[plannerPhase] || {};
-  const totals = planetTotals(plannerPhase);
+  const sim = simulate();
+  const ph = sim.phases[plannerPhase];
   let text = `📋 План фазы ${plannerPhase} — ${g.name}\n`;
-  for (const z of zones) {
+  for (const key of Object.keys(TB.planets)) {
+    const z = TB.planets[key];
+    if (z.bonus || !z.phase || z.phase > plannerPhase) continue;
     const ms = g.members.filter(m => assign[m.allyCode] === z.key);
-    const t = totals[z.key] || { carry: 0, cur: 0 };
-    if (!ms.length && !t.carry) continue;
-    text += `\n${ALIGN_ICON[z.alignment]} ${z.displayName} (${ms.length} чел., деплой ${fmtM(t.cur)}` +
-      (t.carry ? `, всего с прошлых фаз ${fmtM(t.carry + t.cur)}` : '') + `):\n`;
+    if (!ms.length) continue;
+    const carry = ph.carry[z.key] || 0;
+    const cur = ph.cur[z.key] || 0;
+    text += `\n${ALIGN_ICON[z.alignment]} ${z.displayName} (${ms.length} чел., деплой ${fmtM(cur)}` +
+      (carry ? `, всего с прошлых фаз ${fmtM(carry + cur)}` : '') + `):\n`;
     text += ms.map(m => '  • ' + m.name).join('\n') + '\n';
   }
   const rest = g.members.filter(m => !assign[m.allyCode]);
