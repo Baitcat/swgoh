@@ -8,6 +8,7 @@ const TB = window.TB_DATA;
 const PHASES = [1, 2, 3, 4, 5, 6];
 const ALIGN_RU = { dark: 'Тёмная', light: 'Светлая', mixed: 'Смешанная' };
 const ALIGN_ICON = { dark: '🔴', light: '🔵', mixed: '🟣' };
+const PATH_LABEL = { dark: 'слева · тёмная', mixed: 'центр · смешанная', light: 'справа · светлая' };
 
 // русские названия планет
 const RU_NAMES = {
@@ -527,42 +528,20 @@ function renderPlanner() {
     else unassigned++;
   }
 
-  // что показывать в фазе: открытые, уже закрытые (3★) и ещё не открытые планеты фаз 1..N
-  const visible = [];
-  for (let f = 1; f <= plannerPhase; f++) {
-    for (const p of planetsByPhase[f] || []) if (!p.bonus) visible.push(p);
-  }
+  // в фазе показываем только открытые планеты (по одной на путь)
+  const visible = Object.values(PATHS).flat().filter(p => ph.open.has(p.key));
 
   for (const z of visible) {
     const carry = ph.carry[z.key] || 0;
     const cur = ph.cur[z.key] || 0;
     const total = carry + cur;
-    const isOpen = ph.open.has(z.key);
-    // закрыта, если звёзды зафиксированы в одной из ПРЕДЫДУЩИХ фаз
-    const closed = sim.closedAt[z.key] != null && sim.closedAt[z.key] < plannerPhase;
-    const locked = !isOpen && !closed;
 
-    const card = el('div', { class: 'zone-card' + (closed || locked ? ' zone-closed' : '') });
+    const card = el('div', { class: 'zone-card' });
     card.append(el('h4', {}, [
       el('span', { class: 'align-' + z.alignment }, ALIGN_ICON[z.alignment] + ' ' + z.displayName),
-      z.phase < plannerPhase ? el('span', { class: 'badge relic' }, 'с фазы ' + z.phase) : null,
-      closed ? el('span', { class: 'badge bonus' },
-        '★'.repeat(sim.finalStars[z.key]) + ' закрыта (ф.' + sim.closedAt[z.key] + ')') : null,
-      locked ? el('span', { class: 'badge bonus' }, '🔒 не открыта') : null,
+      el('span', { class: 'badge ' + z.alignment }, PATH_LABEL[z.alignment]),
+      z.phase !== plannerPhase ? el('span', { class: 'badge relic' }, 'планета ф.' + z.phase) : null,
     ]));
-    if (locked) {
-      const pred = pathPredecessor(z);
-      card.append(el('div', { class: 'zone-count' },
-        pred ? `Откроется в следующей фазе после звезды на «${pred.displayName}»` : 'Недоступна'));
-      zonesBox.append(card);
-      continue;
-    }
-    if (closed) {
-      card.append(el('div', { class: 'zone-total' }, fmt(carry)));
-      card.append(el('div', { class: 'zone-count' }, 'Звёзды зафиксированы, деплой невозможен'));
-      zonesBox.append(card);
-      continue;
-    }
     card.append(el('div', { class: 'zone-total' }, fmt(total)));
     card.append(el('div', { class: 'zone-count' },
       `${counts[z.key] || 0} игроков · эта фаза: ${fmtM(cur)}` +
@@ -599,14 +578,17 @@ function renderPlanner() {
     });
     sel.append(el('option', { value: '' }, '— не назначен —'));
     for (const z of visible) {
-      const isOpen = ph.open.has(z.key);
-      const cur = assign[m.allyCode] === z.key;
-      if (!isOpen && !cur) continue; // закрытые и не открытые не предлагаем
       const opt = el('option', { value: z.key },
-        ALIGN_ICON[z.alignment] + ' ' + z.displayName +
-        (z.phase < plannerPhase ? ' (ф.' + z.phase + ')' : '') +
-        (!isOpen ? ' — ⚠ недоступна' : ''));
-      if (cur) opt.selected = true;
+        ALIGN_ICON[z.alignment] + ' ' + z.displayName);
+      if (assign[m.allyCode] === z.key) opt.selected = true;
+      sel.append(opt);
+    }
+    // назначение в закрытую/недоступную планету (например, после смены плана)
+    const cur = assign[m.allyCode];
+    if (cur && !ph.open.has(cur) && TB.planets[cur]) {
+      const opt = el('option', { value: cur },
+        '⚠ ' + TB.planets[cur].displayName + ' — недоступна');
+      opt.selected = true;
       sel.append(opt);
     }
     tbody.append(el('tr', {}, [
