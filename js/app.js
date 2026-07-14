@@ -449,49 +449,49 @@ const th3 = z => th(z, 3);
 
 /* Симуляция всего ТБ по текущему плану.
    Правила RotE:
-   — первая планета каждого пути открыта с фазы 1;
-   — следующая планета пути открывается со следующей фазы после того,
-     как на текущей планете пути взята хотя бы 1★;
-   — очки планеты копятся между фазами, пока не набраны 3★;
-   — планета с 3★ закрыта и деплой больше не принимает. */
+   — на каждом пути (тёмный/смешанный/светлый) в каждый момент открыта ровно
+     одна планета — «фронтир» пути; первая открыта с фазы 1;
+   — звёзды фиксируются в конце фазы: если взята хотя бы 1★, планета
+     ЗАКРЫВАЕТСЯ НАВСЕГДА с этими звёздами (добрать позже нельзя),
+     и со следующей фазы открывается следующая планета пути;
+   — если звёзд нет, планета остаётся открытой и очки копятся. */
 function simulate() {
   const g = store.guild;
   const gpByAlly = g ? Object.fromEntries(g.members.map(m => [m.allyCode, m.gp])) : {};
+  const starsOf = (p, pts) => pts >= th(p, 3) ? 3 : pts >= th(p, 2) ? 2 : pts >= th(p, 1) ? 1 : 0;
+  const frontier = { dark: 0, mixed: 0, light: 0 };
   const cum = {};        // key -> накопленные очки
-  const openSince = {};  // key -> фаза, с которой планета открыта
-  const star1At = {};    // key -> фаза, к концу которой взята 1★
-  for (const path of Object.values(PATHS)) if (path[0]) openSince[path[0].key] = 1;
+  const finalStars = {}; // key -> зафиксированные звёзды закрытой планеты
+  const closedAt = {};   // key -> фаза, в конце которой планета закрылась
   const phases = {};
   for (let f = 1; f <= 6; f++) {
     const open = new Set();
-    for (const path of Object.values(PATHS)) {
-      for (const p of path) {
-        if (openSince[p.key] != null && openSince[p.key] <= f && (cum[p.key] || 0) < th3(p)) {
-          open.add(p.key);
-        }
-      }
+    for (const [al, path] of Object.entries(PATHS)) {
+      if (frontier[al] < path.length) open.add(path[frontier[al]].key);
     }
-    const carry = { ...cum };
     const cur = {};
     for (const [ac, pk] of Object.entries(store.plan[f] || {})) {
       cur[pk] = (cur[pk] || 0) + (gpByAlly[ac] || 0);
     }
-    phases[f] = { open, carry, cur };
-    for (const [pk, v] of Object.entries(cur)) cum[pk] = (cum[pk] || 0) + v;
-    // конец фазы: новые 1★ открывают следующие планеты путей со следующей фазы
-    for (const path of Object.values(PATHS)) {
-      for (let i = 0; i < path.length; i++) {
-        const p = path[i];
-        if (star1At[p.key] == null && (cum[p.key] || 0) >= th(p, 1)) {
-          star1At[p.key] = f;
-          if (path[i + 1] && openSince[path[i + 1].key] == null) {
-            openSince[path[i + 1].key] = f + 1;
-          }
-        }
+    phases[f] = { open, carry: { ...cum }, cur };
+    // деплой засчитывается только в открытые планеты
+    for (const [pk, v] of Object.entries(cur)) {
+      if (open.has(pk)) cum[pk] = (cum[pk] || 0) + v;
+    }
+    // конец фазы: фиксация звёзд на фронтирах
+    for (const [al, path] of Object.entries(PATHS)) {
+      const i = frontier[al];
+      if (i >= path.length) continue;
+      const p = path[i];
+      const s = starsOf(p, cum[p.key] || 0);
+      if (s >= 1) {
+        finalStars[p.key] = s;
+        closedAt[p.key] = f;
+        frontier[al]++;
       }
     }
   }
-  return { phases, openSince, star1At, cum };
+  return { phases, finalStars, closedAt, cum };
 }
 
 function renderPlannerPicker() {
@@ -538,27 +538,36 @@ function renderPlanner() {
     const cur = ph.cur[z.key] || 0;
     const total = carry + cur;
     const isOpen = ph.open.has(z.key);
-    const closed = carry >= th3(z); // добита до 3★ ещё до этой фазы
+    // закрыта, если звёзды зафиксированы в одной из ПРЕДЫДУЩИХ фаз
+    const closed = sim.closedAt[z.key] != null && sim.closedAt[z.key] < plannerPhase;
     const locked = !isOpen && !closed;
 
     const card = el('div', { class: 'zone-card' + (closed || locked ? ' zone-closed' : '') });
     card.append(el('h4', {}, [
       el('span', { class: 'align-' + z.alignment }, ALIGN_ICON[z.alignment] + ' ' + z.displayName),
       z.phase < plannerPhase ? el('span', { class: 'badge relic' }, 'с фазы ' + z.phase) : null,
-      closed ? el('span', { class: 'badge bonus' }, '3★ закрыта') : null,
+      closed ? el('span', { class: 'badge bonus' },
+        '★'.repeat(sim.finalStars[z.key]) + ' закрыта (ф.' + sim.closedAt[z.key] + ')') : null,
       locked ? el('span', { class: 'badge bonus' }, '🔒 не открыта') : null,
     ]));
     if (locked) {
       const pred = pathPredecessor(z);
       card.append(el('div', { class: 'zone-count' },
-        pred ? `Откроется в следующей фазе после 1★ на «${pred.displayName}»` : 'Недоступна'));
+        pred ? `Откроется в следующей фазе после звезды на «${pred.displayName}»` : 'Недоступна'));
+      zonesBox.append(card);
+      continue;
+    }
+    if (closed) {
+      card.append(el('div', { class: 'zone-total' }, fmt(carry)));
+      card.append(el('div', { class: 'zone-count' }, 'Звёзды зафиксированы, деплой невозможен'));
       zonesBox.append(card);
       continue;
     }
     card.append(el('div', { class: 'zone-total' }, fmt(total)));
     card.append(el('div', { class: 'zone-count' },
       `${counts[z.key] || 0} игроков · эта фаза: ${fmtM(cur)}` +
-      (carry ? ` · перенос: ${fmtM(carry)}` : '')));
+      (carry ? ` · перенос: ${fmtM(carry)}` : '') +
+      ' · ★ в конце фазы закроет планету'));
     const bars = el('div', { class: 'star-bars' });
     for (const star of [1, 2, 3]) {
       const need = z.starThresholds && z.starThresholds[star];
@@ -650,103 +659,91 @@ $('#btn-auto-distribute').addEventListener('click', () => {
 
 /* --- глобальный оптимизатор всех фаз --- */
 
-/* Beam search по фазам 1..6. Состояние — накопленные очки планет и фазы взятия 1★.
-   На каждой фазе перебираются цели («ничего», «следующая звезда», «3★») для открытых
-   планет; остаток ёмкости подводит ближайшую планету к следующей звезде.
-   Ёмкость фазы = суммарный ГП гильдии × участие (погрешность на неразместившихся). */
+/* Beam search по фазам 1..6 по правилам RotE: на каждом пути открыт один
+   фронтир; взятые в конце фазы звёзды фиксируются, планета закрывается,
+   путь сдвигается. Копить очки можно только не взяв ни одной звезды.
+   Для каждого фронтира перебираются цели: «копим» (0) / 1★ / 2★ / 3★;
+   остаток ёмкости банкуется на копящих планетах, не пересекая порог 1★.
+   Ёмкость фазы = суммарный ГП гильдии × участие (погрешность). */
 function optimizePlan(participation) {
   const g = store.guild;
-  const paths = Object.values(PATHS);
-  const planets = paths.flat();
-  const N = planets.length;
-  const gi = Object.fromEntries(planets.map((p, i) => [p.key, i]));
-  const TH = planets.map(p => [th(p, 1), th(p, 2), th(p, 3)]);
+  const pathsArr = Object.values(PATHS); // [dark[], mixed[], light[]]
   const C = g.members.reduce((s, m) => s + m.gp, 0) * participation;
 
-  const starsOf = (i, cum) => cum >= TH[i][2] ? 3 : cum >= TH[i][1] ? 2 : cum >= TH[i][0] ? 1 : 0;
-  const totalStars = st => st.cum.reduce((s, c, i) => s + starsOf(i, c), 0);
+  // состояние: fr — индексы фронтиров путей, bank — очки на фронтирах,
+  // stars — всего звёзд, allocs — очки по планетам за фазу, log — события
+  let beam = [{ fr: [0, 0, 0], bank: [0, 0, 0], stars: 0, allocs: [], log: [] }];
+  const BEAM = 200;
   const score = st => {
-    let prog = 0;
-    for (let i = 0; i < N; i++) prog += Math.min(1, st.cum[i] / TH[i][2]);
-    return totalStars(st) * 1e6 + prog * 1e3;
+    let bankProg = 0;
+    for (let pi = 0; pi < 3; pi++) {
+      const path = pathsArr[pi];
+      if (st.fr[pi] < path.length) bankProg += Math.min(1, st.bank[pi] / th(path[st.fr[pi]], 1));
+    }
+    return st.stars * 1e6 + bankProg * 100;
   };
-
-  let beam = [{ cum: new Array(N).fill(0), star1At: new Array(N).fill(null), allocs: [] }];
-  const BEAM = 120;
 
   for (let f = 1; f <= 6; f++) {
     const next = [];
     for (const st of beam) {
-      // открытые планеты: путь открыт до первой, чей предшественник не взял 1★
-      const open = [];
-      for (const path of paths) {
-        for (let i = 0; i < path.length; i++) {
-          const idx = gi[path[i].key];
-          if (i > 0) {
-            const prev = gi[path[i - 1].key];
-            if (st.star1At[prev] == null || st.star1At[prev] + 1 > f) break;
-          }
-          if (starsOf(idx, st.cum[idx]) < 3) open.push(idx);
-        }
+      const open = []; // {pi, p, cum}
+      for (let pi = 0; pi < 3; pi++) {
+        const path = pathsArr[pi];
+        if (st.fr[pi] < path.length) open.push({ pi, p: path[st.fr[pi]], cum: st.bank[pi] });
       }
-      // перебор целей: 0 / следующая звезда / 3★, максимум на 3 планетах за фазу
+      // цели по каждому фронтиру: копим / добрать до 1★ / 2★ / 3★
       const combos = [];
-      (function dfs(k, cost, tg, nz) {
-        if (combos.length >= 600) return;
+      (function dfs(k, cost, tg) {
         if (k === open.length) { combos.push(tg.slice()); return; }
-        const idx = open[k];
-        const s0 = starsOf(idx, st.cum[idx]);
-        const opts = [0];
-        if (nz < 3) {
-          const cNext = TH[idx][s0] - st.cum[idx];       // до следующей звезды
-          const cFull = TH[idx][2] - st.cum[idx];        // до 3★
-          if (cost + cNext <= C) opts.push(cNext);
-          if (cFull > cNext && cost + cFull <= C) opts.push(cFull);
+        const o = open[k];
+        const opts = [{ c: 0, s: 0 }];
+        for (let s = 1; s <= 3; s++) {
+          const c = th(o.p, s) - o.cum;
+          if (isFinite(c) && cost + Math.max(0, c) <= C) opts.push({ c: Math.max(0, c), s });
         }
-        for (const c of opts) {
-          tg.push(c);
-          dfs(k + 1, cost + c, tg, nz + (c > 0 ? 1 : 0));
-          tg.pop();
-        }
-      })(0, 0, [], 0);
+        for (const o2 of opts) { tg.push(o2); dfs(k + 1, cost + o2.c, tg); tg.pop(); }
+      })(0, 0, []);
 
       for (const tg of combos) {
-        const cum = st.cum.slice();
-        const alloc = {};
-        let spent = 0;
-        for (let k = 0; k < open.length; k++) {
-          if (tg[k] > 0) {
-            cum[open[k]] += tg[k];
-            alloc[planets[open[k]].key] = tg[k];
-            spent += tg[k];
-          }
-        }
-        // остаток ёмкости — на ближайшую к следующей звезде открытую планету
+        const fr = st.fr.slice(), bank = st.bank.slice();
+        let stars = st.stars;
+        const alloc = {}, log = [];
+        let spent = tg.reduce((a, b) => a + b.c, 0);
         let leftover = C - spent;
-        if (leftover > 0) {
-          let best = -1, bestDef = Infinity;
-          for (const idx of open) {
-            const s = starsOf(idx, cum[idx]);
-            if (s >= 3) continue;
-            const def = TH[idx][s] - cum[idx];
-            if (def < bestDef) { bestDef = def; best = idx; }
-          }
-          if (best >= 0) {
-            cum[best] += leftover;
-            alloc[planets[best].key] = (alloc[planets[best].key] || 0) + leftover;
+        // остаток банкуем на копящих фронтирах, не пересекая порог 1★
+        const staying = open.map((o, k) => ({ o, k })).filter(x => tg[x.k].s === 0)
+          .sort((a, b) => (th(a.o.p, 1) - a.o.cum) - (th(b.o.p, 1) - b.o.cum));
+        const extra = {};
+        for (const { o } of staying) {
+          if (leftover <= 0) break;
+          const room = Math.max(0, th(o.p, 1) - 1 - o.cum - (extra[o.pi] || 0));
+          const add = Math.min(leftover, room);
+          if (add > 0) { extra[o.pi] = (extra[o.pi] || 0) + add; leftover -= add; }
+        }
+        for (let k = 0; k < open.length; k++) {
+          const o = open[k], t = tg[k];
+          if (t.s >= 1) {
+            // звёзды зафиксированы, планета закрыта, путь сдвинулся
+            stars += t.s;
+            fr[o.pi]++;
+            bank[o.pi] = 0;
+            if (t.c > 0) alloc[o.p.key] = t.c;
+            log.push({ f, key: o.p.key, pts: t.c, star: t.s });
+          } else {
+            const add = extra[o.pi] || 0;
+            bank[o.pi] = o.cum + add;
+            if (add > 0) {
+              alloc[o.p.key] = add;
+              log.push({ f, key: o.p.key, pts: add, star: 0 });
+            }
           }
         }
-        const star1At = st.star1At.slice();
-        for (let i = 0; i < N; i++) {
-          if (star1At[i] == null && starsOf(i, cum[i]) >= 1) star1At[i] = f;
-        }
-        next.push({ cum, star1At, allocs: [...st.allocs, alloc] });
+        next.push({ fr, bank, stars, allocs: [...st.allocs, alloc], log: [...st.log, ...log] });
       }
     }
-    // дедупликация похожих состояний и отсечение до ширины луча
     const seen = new Map();
     for (const st of next) {
-      const sig = st.cum.map(x => Math.round(x / 5e6)).join(',');
+      const sig = st.fr.join(',') + '|' + st.bank.map(x => Math.round(x / 5e6)).join(',');
       if (!seen.has(sig) || score(st) > score(seen.get(sig))) seen.set(sig, st);
     }
     beam = [...seen.values()].sort((a, b) => score(b) - score(a)).slice(0, BEAM);
@@ -754,23 +751,9 @@ function optimizePlan(participation) {
 
   const best = beam[0];
   if (!best) return null;
-
-  // восстановим по фазам: звёзды и очки
   const summary = [];
-  const cum = new Array(N).fill(0);
-  for (let f = 1; f <= 6; f++) {
-    const alloc = best.allocs[f - 1] || {};
-    const rows = [];
-    for (const [key, pts] of Object.entries(alloc)) {
-      const i = gi[key];
-      const before = starsOf(i, cum[i]);
-      cum[i] += pts;
-      const after = starsOf(i, cum[i]);
-      rows.push({ key, pts, before, after });
-    }
-    summary.push(rows);
-  }
-  return { best, summary, totalStars: totalStars(best), capacity: C };
+  for (let f = 1; f <= 6; f++) summary.push(best.log.filter(e => e.f === f));
+  return { best, summary, totalStars: best.stars, capacity: C };
 }
 
 $('#btn-optimize-all').addEventListener('click', () => {
@@ -808,11 +791,11 @@ $('#btn-optimize-all').addEventListener('click', () => {
     ` <span class="muted">(участие ${Math.round(participation * 100)}%, ёмкость фазы ${fmtM(res.capacity)})</span><table>`;
   for (let f = 1; f <= 6; f++) {
     const rows = res.summary[f - 1]
-      .filter(r => r.pts > 0)
+      .filter(r => r.pts > 0 || r.star > 0)
       .map(r => {
         const p = TB.planets[r.key];
         return `${ALIGN_ICON[p.alignment]} ${p.displayName}: +${fmtM(r.pts)}` +
-          (r.after > r.before ? ` → ${starStr(r.after)}` : ' (подводим)');
+          (r.star > 0 ? ` → ${starStr(r.star)} (закрыта)` : ' (копим)');
       });
     html += `<tr><th>Фаза ${f}</th><td>${rows.join('<br>') || '—'}</td></tr>`;
   }
