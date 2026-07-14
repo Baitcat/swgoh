@@ -59,7 +59,11 @@ const store = {
   guild: load('tbp_guild') || window.GUILD_SEED || null,
   rosters: load('tbp_rosters') || {}, // {allyCode: {t, name, units:{norm:{r,s,c}}}}
   plan: load('tbp_plan') || {},       // {phase: {allyCode: planetKey}}
+  settings: load('tbp_settings') || { participation: 90 }, // «участие», % ГП
 };
+const saveSettings = () => save('tbp_settings', store.settings);
+// доля ГП, которая реально деплоится (погрешность на неразместившихся)
+const participation = () => Math.min(100, Math.max(50, +store.settings.participation || 90)) / 100;
 
 function load(k) {
   try { return JSON.parse(localStorage.getItem(k)); } catch { return null; }
@@ -458,7 +462,9 @@ const th3 = z => th(z, 3);
    — если звёзд нет, планета остаётся открытой и очки копятся. */
 function simulate() {
   const g = store.guild;
-  const gpByAlly = g ? Object.fromEntries(g.members.map(m => [m.allyCode, m.gp])) : {};
+  // считаем ожидаемые очки: ГП игрока × участие
+  const part = participation();
+  const gpByAlly = g ? Object.fromEntries(g.members.map(m => [m.allyCode, m.gp * part])) : {};
   const starsOf = (p, pts) => pts >= th(p, 3) ? 3 : pts >= th(p, 2) ? 2 : pts >= th(p, 1) ? 1 : 0;
   const frontier = { dark: 0, mixed: 0, light: 0 };
   const cum = {};        // key -> накопленные очки
@@ -542,10 +548,11 @@ function renderPlanner() {
       el('span', { class: 'badge ' + z.alignment }, PATH_LABEL[z.alignment]),
       z.phase !== plannerPhase ? el('span', { class: 'badge relic' }, 'планета ф.' + z.phase) : null,
     ]));
-    card.append(el('div', { class: 'zone-total' }, fmt(total)));
+    card.append(el('div', { class: 'zone-total' }, fmt(Math.round(total))));
     card.append(el('div', { class: 'zone-count' },
       `${counts[z.key] || 0} игроков · эта фаза: ${fmtM(cur)}` +
       (carry ? ` · перенос: ${fmtM(carry)}` : '') +
+      ` · ожидаемо при участии ${Math.round(participation() * 100)}%` +
       ' · ★ в конце фазы закроет планету'));
     const bars = el('div', { class: 'star-bars' });
     for (const star of [1, 2, 3]) {
@@ -599,6 +606,16 @@ function renderPlanner() {
   }
 }
 
+/* --- участие (погрешность) --- */
+
+$('#opt-participation').value = store.settings.participation;
+$('#opt-participation').addEventListener('change', () => {
+  store.settings.participation = Math.min(100, Math.max(50, +$('#opt-participation').value || 90));
+  $('#opt-participation').value = store.settings.participation;
+  saveSettings();
+  renderPlanner(); // ожидаемые очки в карточках зависят от участия
+});
+
 /* --- авторазложение --- */
 
 $('#btn-auto-distribute').addEventListener('click', () => {
@@ -632,7 +649,7 @@ $('#btn-auto-distribute').addEventListener('click', () => {
     pool.sort((a, b) => metric ? metric(b) - metric(a) : a.have - b.have);
     const t = pool[0];
     assign[m.allyCode] = t.key;
-    t.have += m.gp;
+    t.have += m.gp * participation();
   }
   store.plan[plannerPhase] = assign;
   savePlan();
@@ -698,7 +715,8 @@ function optimizePlan(participation) {
         const extra = {};
         for (const { o } of staying) {
           if (leftover <= 0) break;
-          const room = Math.max(0, th(o.p, 1) - 1 - o.cum - (extra[o.pi] || 0));
+          // банкуем максимум до 90% порога 1★ — запас на неточность раскладки по игрокам
+          const room = Math.max(0, th(o.p, 1) * 0.9 - o.cum - (extra[o.pi] || 0));
           const add = Math.min(leftover, room);
           if (add > 0) { extra[o.pi] = (extra[o.pi] || 0) + add; leftover -= add; }
         }
@@ -744,23 +762,56 @@ $('#btn-optimize-all').addEventListener('click', () => {
   const hasPlan = Object.values(store.plan).some(p => Object.keys(p).length);
   if (hasPlan && !confirm('Пересчитать оптимальный план всех 6 фаз? Текущие назначения будут заменены.')) return;
 
-  const participation = Math.min(100, Math.max(50, +$('#opt-participation').value || 90)) / 100;
-  const res = optimizePlan(participation);
+  const part = participation();
+  const res = optimizePlan(part);
   if (!res) { alert('Не удалось построить план.'); return; }
 
-  // раскладываем игроков по целям каждой фазы
+  /* Раскладываем игроков по целям каждой фазы (в ожидаемых очках = ГП × участие).
+     На планеты-«копилки» нельзя класть больше 95% порога 1★ — иначе случайная
+     звезда закроет планету раньше времени. Лишние игроки идут на планеты,
+     где звёзды берутся в эту фазу (перебор там безвреден), иначе — в резерв. */
   store.plan = {};
+  const actualCum = {};  // фактически набранные (ожидаемые) очки по планетам
+  const plannedCum = {}; // плановые очки по планетам
   for (let f = 1; f <= 6; f++) {
-    const alloc = res.best.allocs[f - 1] || {};
-    const targets = Object.entries(alloc).map(([key, rem]) => ({ key, rem }));
-    if (!targets.length) continue;
+    const events = res.summary[f - 1] || [];
+    const starT = [], bankT = [];
+    for (const e of events) {
+      const p = TB.planets[e.key];
+      const have = actualCum[e.key] || 0;
+      plannedCum[e.key] = (plannedCum[e.key] || 0) + e.pts;
+      if (e.star > 0) {
+        // цель — реальный порог звезды с учётом фактического переноса
+        starT.push({ key: e.key, rem: th(p, e.star) - have });
+      } else {
+        bankT.push({
+          key: e.key,
+          rem: plannedCum[e.key] - have,
+          roomToCap: Math.max(0, th(p, 1) * 0.95 - have),
+        });
+      }
+    }
+    if (!starT.length && !bankT.length) continue;
     const assign = {};
     for (const m of [...g.members].sort((a, b) => b.gp - a.gp)) {
-      targets.sort((a, b) => b.rem - a.rem);
-      assign[m.allyCode] = targets[0].key;
-      targets[0].rem -= m.gp;
+      const egp = m.gp * part;
+      // сначала закрываем недоборы (звёздные цели и копилки с местом)
+      const cand = [
+        ...starT.filter(t => t.rem > 0),
+        ...bankT.filter(t => t.rem > 0 && egp <= t.roomToCap),
+      ].sort((a, b) => b.rem - a.rem);
+      let t = cand[0];
+      if (!t && starT.length) {
+        // цели закрыты — лишних кладём на звёздную планету с наименьшим перебором
+        t = starT.reduce((x, y) => (y.rem > x.rem ? y : x));
+      }
+      if (!t) continue; // некуда без риска — игрок в резерве
+      assign[m.allyCode] = t.key;
+      t.rem -= egp;
+      if (t.roomToCap != null) t.roomToCap -= egp;
+      actualCum[t.key] = (actualCum[t.key] || 0) + egp;
     }
-    store.plan[f] = assign;
+    if (Object.keys(assign).length) store.plan[f] = assign;
   }
   savePlan();
 
@@ -770,7 +821,7 @@ $('#btn-optimize-all').addEventListener('click', () => {
   box.classList.add('ok');
   const starStr = n => n ? '★'.repeat(n) : '—';
   let html = `<b>Оптимальный план: ${res.totalStars} ★ из ${Object.values(PATHS).flat().length * 3}</b>` +
-    ` <span class="muted">(участие ${Math.round(participation * 100)}%, ёмкость фазы ${fmtM(res.capacity)})</span><table>`;
+    ` <span class="muted">(участие ${Math.round(part * 100)}%, ёмкость фазы ${fmtM(res.capacity)})</span><table>`;
   for (let f = 1; f <= 6; f++) {
     const rows = res.summary[f - 1]
       .filter(r => r.pts > 0 || r.star > 0)
