@@ -139,8 +139,25 @@ function normalizePlayer(json) {
     allyCode: String(d.ally_code || ''),
     name: d.name || '',
     t: Date.now(),
+    gp: d.galactic_power || 0,
+    charGp: d.character_galactic_power || 0,
+    shipGp: d.ship_galactic_power || 0,
     units,
   };
+}
+
+// В JSON гильдии нет разбивки ГП на персонажей/флот — берём её из ростеров игроков
+function syncGpFromRosters() {
+  if (!store.guild) return;
+  let changed = false;
+  for (const m of store.guild.members) {
+    const r = store.rosters[m.allyCode];
+    if (!r) continue;
+    for (const [src, dst] of [['charGp', 'charGp'], ['shipGp', 'shipGp'], ['gp', 'gp']]) {
+      if (r[src] && m[dst] !== r[src]) { m[dst] = r[src]; changed = true; }
+    }
+  }
+  if (changed) saveGuild();
 }
 
 /* ---------------- Вкладки ---------------- */
@@ -278,8 +295,8 @@ function renderMembers() {
         el('a', { href: 'https://swgoh.gg/p/' + m.allyCode + '/', target: '_blank', rel: 'noopener', class: 'muted' }, '↗'),
       ]),
       el('td', { class: 'num' }, fmt(m.gp)),
-      el('td', { class: 'num' }, fmt(m.charGp)),
-      el('td', { class: 'num' }, fmt(m.shipGp)),
+      el('td', { class: 'num' }, m.charGp ? fmt(m.charGp) : '—'),
+      el('td', { class: 'num' }, m.shipGp ? fmt(m.shipGp) : '—'),
       el('td', { class: 'num' }, r
         ? el('span', { class: 'pill ok', title: 'Загружен ' + new Date(r.t).toLocaleString('ru-RU') }, '✓')
         : el('span', { class: 'pill', title: 'Ростер не загружен' }, '—')),
@@ -299,7 +316,8 @@ async function loadAllRosters() {
   const prog = $('#roster-progress');
   const targets = store.guild.members.filter(m => {
     const r = store.rosters[m.allyCode];
-    return !r || (Date.now() - r.t) > 24 * 3600 * 1000; // обновляем раз в сутки
+    // r.gp == null — ростер сохранён старой версией без ГП, перезагружаем
+    return !r || r.gp == null || (Date.now() - r.t) > 24 * 3600 * 1000; // обновляем раз в сутки
   });
   let ok = 0, fail = 0;
   for (let i = 0; i < targets.length; i++) {
@@ -401,9 +419,32 @@ function renderPhases() {
 
 let plannerPhase = 1;
 
+// В RotE планеты остаются открытыми, пока не набраны 3★: в фазе N можно
+// деплоить на любую планету фаз 1..N, очки копятся между фазами.
 function deployZones(phase) {
-  return (planetsByPhase[phase] || []).filter(p => !p.bonus);
+  const out = [];
+  for (let f = 1; f <= phase; f++) {
+    for (const p of planetsByPhase[f] || []) if (!p.bonus) out.push(p);
+  }
+  return out;
 }
+
+// накопленные очки по планетам: carry — из фаз до текущей, cur — в текущей
+function planetTotals(phase) {
+  const t = {};
+  const g = store.guild;
+  if (!g) return t;
+  const gpByAlly = Object.fromEntries(g.members.map(m => [m.allyCode, m.gp]));
+  for (let f = 1; f <= phase; f++) {
+    for (const [ac, pk] of Object.entries(store.plan[f] || {})) {
+      const rec = t[pk] = t[pk] || { carry: 0, cur: 0 };
+      rec[f < phase ? 'carry' : 'cur'] += gpByAlly[ac] || 0;
+    }
+  }
+  return t;
+}
+
+const th3 = z => (z.starThresholds && z.starThresholds['3']) || Infinity;
 
 function renderPlannerPicker() {
   const box = $('#planner-phase-picker');
@@ -429,29 +470,34 @@ function renderPlanner() {
   }
   const zones = deployZones(plannerPhase);
   const assign = store.plan[plannerPhase] || {};
-
-  // суммы по зонам
-  const totals = {}, counts = {};
-  for (const z of zones) { totals[z.key] = 0; counts[z.key] = 0; }
+  const totals = planetTotals(plannerPhase);
+  const counts = {};
   let unassigned = 0;
   for (const m of g.members) {
     const zk = assign[m.allyCode];
-    if (zk && totals[zk] != null) { totals[zk] += m.gp; counts[zk]++; }
+    if (zk) counts[zk] = (counts[zk] || 0) + 1;
     else unassigned++;
   }
 
   for (const z of zones) {
-    const card = el('div', { class: 'zone-card' });
+    const t = totals[z.key] || { carry: 0, cur: 0 };
+    const total = t.carry + t.cur;
+    const closed = t.carry >= th3(z); // добита до 3★ ещё до этой фазы
+    const card = el('div', { class: 'zone-card' + (closed ? ' zone-closed' : '') });
     card.append(el('h4', {}, [
       el('span', { class: 'align-' + z.alignment }, ALIGN_ICON[z.alignment] + ' ' + z.displayName),
+      z.phase < plannerPhase ? el('span', { class: 'badge relic' }, 'с фазы ' + z.phase) : null,
+      closed ? el('span', { class: 'badge bonus' }, '3★ закрыта') : null,
     ]));
-    card.append(el('div', { class: 'zone-total' }, fmt(totals[z.key])));
-    card.append(el('div', { class: 'zone-count' }, counts[z.key] + ' игроков · деплой (без учёта миссий)'));
+    card.append(el('div', { class: 'zone-total' }, fmt(total)));
+    card.append(el('div', { class: 'zone-count' },
+      `${counts[z.key] || 0} игроков · эта фаза: ${fmtM(t.cur)}` +
+      (t.carry ? ` · перенос: ${fmtM(t.carry)}` : '')));
     const bars = el('div', { class: 'star-bars' });
     for (const star of [1, 2, 3]) {
       const need = z.starThresholds && z.starThresholds[star];
       if (!need) continue;
-      const pct = Math.min(100, totals[z.key] / need * 100);
+      const pct = Math.min(100, total / need * 100);
       bars.append(el('div', { class: 'star-bar' }, [
         el('div', { class: 'fill' + (pct >= 100 ? ' done' : ''), style: 'width:' + pct.toFixed(1) + '%' }),
         el('div', { class: 'lbl' }, [
@@ -478,7 +524,13 @@ function renderPlanner() {
     });
     sel.append(el('option', { value: '' }, '— не назначен —'));
     for (const z of zones) {
-      const opt = el('option', { value: z.key }, ALIGN_ICON[z.alignment] + ' ' + z.displayName);
+      const t = totals[z.key] || { carry: 0, cur: 0 };
+      const closed = t.carry >= th3(z);
+      const opt = el('option', { value: z.key },
+        ALIGN_ICON[z.alignment] + ' ' + z.displayName +
+        (z.phase < plannerPhase ? ' (ф.' + z.phase + ')' : '') +
+        (closed ? ' — 3★ закрыта' : ''));
+      if (closed && assign[m.allyCode] !== z.key) opt.disabled = true;
       if (assign[m.allyCode] === z.key) opt.selected = true;
       sel.append(opt);
     }
@@ -499,11 +551,19 @@ $('#btn-auto-distribute').addEventListener('click', () => {
   if (!zones.length) return;
   if (!confirm(`Перераспределить всех игроков по зонам фазы ${plannerPhase} автоматически? Текущие назначения фазы будут заменены.`)) return;
 
-  const targets = zones.map(z => ({ key: z.key, need: (z.starThresholds && z.starThresholds['3']) || 1, total: 0 }));
+  // дефицит до 3★ с учётом очков, перенесённых из прошлых фаз
+  const totals = planetTotals(plannerPhase);
+  const targets = zones
+    .map(z => {
+      const carry = (totals[z.key] || { carry: 0 }).carry;
+      return { key: z.key, need: Math.max(0, th3(z) - carry), total: 0 };
+    })
+    .filter(t => t.need > 0 && isFinite(t.need));
+  if (!targets.length) { alert('Все доступные планеты уже закрыты на 3★.'); return; }
   const assign = {};
   const members = [...g.members].sort((a, b) => b.gp - a.gp);
   for (const m of members) {
-    // зона с наибольшим относительным дефицитом до 3*
+    // зона с наибольшим относительным дефицитом до 3★
     targets.sort((a, b) => (b.need - b.total) / b.need - (a.need - a.total) / a.need);
     const t = targets[0];
     assign[m.allyCode] = t.key;
@@ -521,11 +581,14 @@ $('#btn-copy-plan').addEventListener('click', async () => {
   if (!g) return;
   const zones = deployZones(plannerPhase);
   const assign = store.plan[plannerPhase] || {};
+  const totals = planetTotals(plannerPhase);
   let text = `📋 План фазы ${plannerPhase} — ${g.name}\n`;
   for (const z of zones) {
     const ms = g.members.filter(m => assign[m.allyCode] === z.key);
-    const total = ms.reduce((s, m) => s + m.gp, 0);
-    text += `\n${ALIGN_ICON[z.alignment]} ${z.displayName} (${ms.length} чел., ${fmtM(total)}):\n`;
+    const t = totals[z.key] || { carry: 0, cur: 0 };
+    if (!ms.length && !t.carry) continue;
+    text += `\n${ALIGN_ICON[z.alignment]} ${z.displayName} (${ms.length} чел., деплой ${fmtM(t.cur)}` +
+      (t.carry ? `, всего с прошлых фаз ${fmtM(t.carry + t.cur)}` : '') + `):\n`;
     text += ms.map(m => '  • ' + m.name).join('\n') + '\n';
   }
   const rest = g.members.filter(m => !assign[m.allyCode]);
@@ -702,6 +765,7 @@ function renderSpecials() {
 /* ---------------- Инициализация ---------------- */
 
 function renderAll() {
+  syncGpFromRosters();
   renderGuild();
   renderPhases();
   renderPlanner();

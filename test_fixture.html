@@ -16,32 +16,44 @@ const guildJson = {
     galactic_power: 2400000000,
     member_count: 8,
     members: [
-      { player_name: 'Alpha',  ally_code: 111111111, galactic_power: 11000000, character_galactic_power: 6000000, ship_galactic_power: 5000000 },
-      { player_name: 'Bravo',  ally_code: 222222222, galactic_power: 9500000,  character_galactic_power: 5000000, ship_galactic_power: 4500000 },
-      { player_name: 'Charlie',ally_code: 333333333, galactic_power: 8000000,  character_galactic_power: 4200000, ship_galactic_power: 3800000 },
-      { player_name: 'Delta',  ally_code: 444444444, galactic_power: 7000000,  character_galactic_power: 3600000, ship_galactic_power: 3400000 },
-      { player_name: 'Echo',   ally_code: 555555555, galactic_power: 6000000,  character_galactic_power: 3100000, ship_galactic_power: 2900000 },
-      { player_name: 'Foxtrot',ally_code: 666666666, galactic_power: 5500000,  character_galactic_power: 2900000, ship_galactic_power: 2600000 },
-      { player_name: 'Golf',   ally_code: 777777777, galactic_power: 5000000,  character_galactic_power: 2700000, ship_galactic_power: 2300000 },
-      { player_name: 'Hotel',  ally_code: 888888888, galactic_power: 4200000,  character_galactic_power: 2300000, ship_galactic_power: 1900000 },
+      { player_name: 'Alpha',  ally_code: 111111111, galactic_power: 330000000 },
+      { player_name: 'Bravo',  ally_code: 222222222, galactic_power: 285000000 },
+      { player_name: 'Charlie',ally_code: 333333333, galactic_power: 240000000 },
+      { player_name: 'Delta',  ally_code: 444444444, galactic_power: 210000000 },
+      { player_name: 'Echo',   ally_code: 555555555, galactic_power: 180000000 },
+      { player_name: 'Foxtrot',ally_code: 666666666, galactic_power: 165000000 },
+      { player_name: 'Golf',   ally_code: 777777777, galactic_power: 150000000 },
+      { player_name: 'Hotel',  ally_code: 888888888, galactic_power: 126000000 },
     ],
   },
 };
-function playerJson(name, ally, units) {
-  return { data: { name, ally_code: ally }, units: units.map(u => ({ data: u })) };
+function playerJson(name, ally, units, gps) {
+  return { data: Object.assign({ name, ally_code: ally }, gps || {}), units: units.map(u => ({ data: u })) };
 }
+// проверка синхронизации ГП: у гильдии нет разбивки по персонажам/флоту, берём из ростера
+window.__GP1 = { galactic_power: 330000000, character_galactic_power: 180000000, ship_galactic_power: 150000000 };
+window.__GP2 = { galactic_power: 285000000, character_galactic_power: 155000000, ship_galactic_power: 130000000 };
+// план фазы 1 (кумулятивная логика): Mustafar и Corellia будут закрыты на 3★, Coruscant — перенос
+localStorage.setItem('tbp_plan', JSON.stringify({
+  1: {
+    '111111111': 'mustafar', '222222222': 'mustafar',   // 615 млн > 248,3 млн → 3★
+    '333333333': 'corellia',                            // 240 млн > 238,3 млн → 3★
+    '444444444': 'coruscant',                           // 210 млн из 248,3 млн → перенос 84%
+  },
+  2: { '555555555': 'geonosis', '666666666': 'coruscant' },
+}));
 const p1 = playerJson('Alpha', 111111111, [
   { name: 'Darth Traya', combat_type: 1, relic_tier: 9, rarity: 7 },   // R7
   { name: 'Emperor Palpatine', combat_type: 1, relic_tier: 11, rarity: 7 }, // R9
   { name: 'Chimaera', combat_type: 2, rarity: 7 },
   { name: "Hound's Tooth", combat_type: 2, rarity: 7 },
   { name: 'Darth Revan', combat_type: 1, relic_tier: 7, rarity: 7 },   // R5
-]);
+], window.__GP1);
 const p2 = playerJson('Bravo', 222222222, [
   { name: 'Darth Traya', combat_type: 1, relic_tier: 7, rarity: 7 },   // R5
   { name: 'Chimaera', combat_type: 2, rarity: 6 },                      // не 7*
   { name: 'General Grievous', combat_type: 1, relic_tier: 9, rarity: 7 },
-]);
+], window.__GP2);
 // прогоняем через реальный код приложения: заполняем поля ручного импорта после загрузки
 window.__TEST__ = { guildJson, players: [p1, p2] };
 
@@ -77,9 +89,12 @@ window.addEventListener('message', ev => {
     document.getElementById('btn-load-guild').click();
     document.getElementById('manual-player-json').value = window.__TEST__.players.map(p => JSON.stringify(p)).join('\n');
     document.getElementById('btn-manual-player').click();
-    // переключение вкладки по параметру ?tab=
-    const tab = new URLSearchParams(location.search).get('tab');
+    // переключение вкладки по параметру ?tab=, фазы планировщика — по ?phase=
+    const qs = new URLSearchParams(location.search);
+    const tab = qs.get('tab');
     if (tab) document.querySelector(`[data-tab="${tab}"]`).click();
+    const phase = qs.get('phase');
+    if (phase) document.querySelectorAll('#planner-phase-picker button')[phase - 1].click();
     document.title = 'TEST-READY';
   };
   document.body.append(s);

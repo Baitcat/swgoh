@@ -168,7 +168,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border-radius: 10px;
   padding: 12px 14px;
 }
-.zone-card h4 { margin: 0 0 6px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.zone-card h4 { margin: 0 0 6px; font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.zone-card.zone-closed { opacity: 0.55; }
 .zone-card .align-dark { color: #ff7b72; }
 .zone-card .align-light { color: #79c0ff; }
 .zone-card .align-mixed { color: #d2a8ff; }
