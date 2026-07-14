@@ -111,6 +111,10 @@ button.primary:hover { background: #2a7aff; }
 button.danger { border-color: var(--red); color: var(--red); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 .file-btn input { display: none; }
+.opt-label { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--muted); }
+.opt-label input { width: 58px; background: var(--bg-sub); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 6px; font-size: 14px; }
+#optimize-summary table { border-collapse: collapse; margin-top: 6px; }
+#optimize-summary td, #optimize-summary th { padding: 2px 12px 2px 0; text-align: left; font-size: 13px; vertical-align: top; }
 
 .status {
   margin: 10px 0;

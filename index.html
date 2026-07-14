@@ -105,6 +105,10 @@
       <div class="card-head">
         <h2>Распределение по зонам</h2>
         <div class="actions">
+          <label class="opt-label" title="Какая доля суммарного ГП гильдии реально задеплоится (не все игроки размещаются)">Участие
+            <input id="opt-participation" type="number" min="50" max="100" step="5" value="90"> %
+          </label>
+          <button id="btn-optimize-all" class="primary" title="Просчитать оптимальный план всех 6 фаз: где брать звёзды, а где подводить к ним">🧠 Оптимизировать все фазы</button>
           <button id="btn-auto-distribute">⚙ Авторазложить фазу</button>
           <button id="btn-copy-plan">📋 Скопировать план фазы</button>
           <button id="btn-export-plan">⤓ Экспорт плана</button>
@@ -112,6 +116,7 @@
         </div>
       </div>
       <div class="phase-picker" id="planner-phase-picker"></div>
+      <div id="optimize-summary" class="status hidden"></div>
       <p class="muted">Каждый игрок в фазе несёт весь свой ГП (персонажи + флот) в одну зону.
         Планеты остаются открытыми между фазами: очки копятся, и недобранную планету можно
         добить в следующих фазах (показывается как «перенос»). Закрытые на 3★ планеты

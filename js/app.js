@@ -648,6 +648,179 @@ $('#btn-auto-distribute').addEventListener('click', () => {
   renderPlanner();
 });
 
+/* --- глобальный оптимизатор всех фаз --- */
+
+/* Beam search по фазам 1..6. Состояние — накопленные очки планет и фазы взятия 1★.
+   На каждой фазе перебираются цели («ничего», «следующая звезда», «3★») для открытых
+   планет; остаток ёмкости подводит ближайшую планету к следующей звезде.
+   Ёмкость фазы = суммарный ГП гильдии × участие (погрешность на неразместившихся). */
+function optimizePlan(participation) {
+  const g = store.guild;
+  const paths = Object.values(PATHS);
+  const planets = paths.flat();
+  const N = planets.length;
+  const gi = Object.fromEntries(planets.map((p, i) => [p.key, i]));
+  const TH = planets.map(p => [th(p, 1), th(p, 2), th(p, 3)]);
+  const C = g.members.reduce((s, m) => s + m.gp, 0) * participation;
+
+  const starsOf = (i, cum) => cum >= TH[i][2] ? 3 : cum >= TH[i][1] ? 2 : cum >= TH[i][0] ? 1 : 0;
+  const totalStars = st => st.cum.reduce((s, c, i) => s + starsOf(i, c), 0);
+  const score = st => {
+    let prog = 0;
+    for (let i = 0; i < N; i++) prog += Math.min(1, st.cum[i] / TH[i][2]);
+    return totalStars(st) * 1e6 + prog * 1e3;
+  };
+
+  let beam = [{ cum: new Array(N).fill(0), star1At: new Array(N).fill(null), allocs: [] }];
+  const BEAM = 120;
+
+  for (let f = 1; f <= 6; f++) {
+    const next = [];
+    for (const st of beam) {
+      // открытые планеты: путь открыт до первой, чей предшественник не взял 1★
+      const open = [];
+      for (const path of paths) {
+        for (let i = 0; i < path.length; i++) {
+          const idx = gi[path[i].key];
+          if (i > 0) {
+            const prev = gi[path[i - 1].key];
+            if (st.star1At[prev] == null || st.star1At[prev] + 1 > f) break;
+          }
+          if (starsOf(idx, st.cum[idx]) < 3) open.push(idx);
+        }
+      }
+      // перебор целей: 0 / следующая звезда / 3★, максимум на 3 планетах за фазу
+      const combos = [];
+      (function dfs(k, cost, tg, nz) {
+        if (combos.length >= 600) return;
+        if (k === open.length) { combos.push(tg.slice()); return; }
+        const idx = open[k];
+        const s0 = starsOf(idx, st.cum[idx]);
+        const opts = [0];
+        if (nz < 3) {
+          const cNext = TH[idx][s0] - st.cum[idx];       // до следующей звезды
+          const cFull = TH[idx][2] - st.cum[idx];        // до 3★
+          if (cost + cNext <= C) opts.push(cNext);
+          if (cFull > cNext && cost + cFull <= C) opts.push(cFull);
+        }
+        for (const c of opts) {
+          tg.push(c);
+          dfs(k + 1, cost + c, tg, nz + (c > 0 ? 1 : 0));
+          tg.pop();
+        }
+      })(0, 0, [], 0);
+
+      for (const tg of combos) {
+        const cum = st.cum.slice();
+        const alloc = {};
+        let spent = 0;
+        for (let k = 0; k < open.length; k++) {
+          if (tg[k] > 0) {
+            cum[open[k]] += tg[k];
+            alloc[planets[open[k]].key] = tg[k];
+            spent += tg[k];
+          }
+        }
+        // остаток ёмкости — на ближайшую к следующей звезде открытую планету
+        let leftover = C - spent;
+        if (leftover > 0) {
+          let best = -1, bestDef = Infinity;
+          for (const idx of open) {
+            const s = starsOf(idx, cum[idx]);
+            if (s >= 3) continue;
+            const def = TH[idx][s] - cum[idx];
+            if (def < bestDef) { bestDef = def; best = idx; }
+          }
+          if (best >= 0) {
+            cum[best] += leftover;
+            alloc[planets[best].key] = (alloc[planets[best].key] || 0) + leftover;
+          }
+        }
+        const star1At = st.star1At.slice();
+        for (let i = 0; i < N; i++) {
+          if (star1At[i] == null && starsOf(i, cum[i]) >= 1) star1At[i] = f;
+        }
+        next.push({ cum, star1At, allocs: [...st.allocs, alloc] });
+      }
+    }
+    // дедупликация похожих состояний и отсечение до ширины луча
+    const seen = new Map();
+    for (const st of next) {
+      const sig = st.cum.map(x => Math.round(x / 5e6)).join(',');
+      if (!seen.has(sig) || score(st) > score(seen.get(sig))) seen.set(sig, st);
+    }
+    beam = [...seen.values()].sort((a, b) => score(b) - score(a)).slice(0, BEAM);
+  }
+
+  const best = beam[0];
+  if (!best) return null;
+
+  // восстановим по фазам: звёзды и очки
+  const summary = [];
+  const cum = new Array(N).fill(0);
+  for (let f = 1; f <= 6; f++) {
+    const alloc = best.allocs[f - 1] || {};
+    const rows = [];
+    for (const [key, pts] of Object.entries(alloc)) {
+      const i = gi[key];
+      const before = starsOf(i, cum[i]);
+      cum[i] += pts;
+      const after = starsOf(i, cum[i]);
+      rows.push({ key, pts, before, after });
+    }
+    summary.push(rows);
+  }
+  return { best, summary, totalStars: totalStars(best), capacity: C };
+}
+
+$('#btn-optimize-all').addEventListener('click', () => {
+  const g = store.guild;
+  if (!g) { alert('Сначала загрузите гильдию.'); return; }
+  const hasPlan = Object.values(store.plan).some(p => Object.keys(p).length);
+  if (hasPlan && !confirm('Пересчитать оптимальный план всех 6 фаз? Текущие назначения будут заменены.')) return;
+
+  const participation = Math.min(100, Math.max(50, +$('#opt-participation').value || 90)) / 100;
+  const res = optimizePlan(participation);
+  if (!res) { alert('Не удалось построить план.'); return; }
+
+  // раскладываем игроков по целям каждой фазы
+  store.plan = {};
+  for (let f = 1; f <= 6; f++) {
+    const alloc = res.best.allocs[f - 1] || {};
+    const targets = Object.entries(alloc).map(([key, rem]) => ({ key, rem }));
+    if (!targets.length) continue;
+    const assign = {};
+    for (const m of [...g.members].sort((a, b) => b.gp - a.gp)) {
+      targets.sort((a, b) => b.rem - a.rem);
+      assign[m.allyCode] = targets[0].key;
+      targets[0].rem -= m.gp;
+    }
+    store.plan[f] = assign;
+  }
+  savePlan();
+
+  // сводка
+  const box = $('#optimize-summary');
+  box.classList.remove('hidden', 'err');
+  box.classList.add('ok');
+  const starStr = n => n ? '★'.repeat(n) : '—';
+  let html = `<b>Оптимальный план: ${res.totalStars} ★ из ${Object.values(PATHS).flat().length * 3}</b>` +
+    ` <span class="muted">(участие ${Math.round(participation * 100)}%, ёмкость фазы ${fmtM(res.capacity)})</span><table>`;
+  for (let f = 1; f <= 6; f++) {
+    const rows = res.summary[f - 1]
+      .filter(r => r.pts > 0)
+      .map(r => {
+        const p = TB.planets[r.key];
+        return `${ALIGN_ICON[p.alignment]} ${p.displayName}: +${fmtM(r.pts)}` +
+          (r.after > r.before ? ` → ${starStr(r.after)}` : ' (подводим)');
+      });
+    html += `<tr><th>Фаза ${f}</th><td>${rows.join('<br>') || '—'}</td></tr>`;
+  }
+  html += '</table>';
+  box.innerHTML = html;
+  renderPlanner();
+});
+
 /* --- копирование / экспорт / импорт плана --- */
 
 $('#btn-copy-plan').addEventListener('click', async () => {
