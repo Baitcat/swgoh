@@ -122,9 +122,10 @@ window.addEventListener('message', ev => {
   const s = document.createElement('script');
   s.src = 'js/app.js';
   s.onload = () => {
-    // автозагрузка гильдии по кнопке (мок-мост ответит) → ростеры подгрузятся автоматически
+    // ручной импорт гильдии → ростеры подгрузятся автоматически
     document.getElementById('guild-url').value = 'https://swgoh.gg/g/HWTOggWMSD6t06XEYD924w/';
-    document.getElementById('btn-load-guild').click();
+    document.getElementById('manual-guild-json').value = JSON.stringify(guildJson);
+    document.getElementById('btn-manual-guild').click();
     // переключение вкладки по параметру ?tab=, фазы — ?phase=, оптимизатор — ?optimize=1
     // (импорт гильдии и автозагрузка ростеров асинхронные, поэтому ждём)
     const qs = new URLSearchParams(location.search);
