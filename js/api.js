@@ -79,7 +79,10 @@ const SwgohApi = (() => {
     }
   }
 
-  async function fetchJson(url, onStatus) {
+  const delay = ms => new Promise(r => setTimeout(r, ms));
+
+  async function fetchJson(url, onStatus, opts = {}) {
+    const { retries = 0, timeoutMs = 15000 } = opts;
     // 1) мост, если установлен — самый надёжный способ
     if (bridge.isReady()) {
       try {
@@ -89,23 +92,29 @@ const SwgohApi = (() => {
         if (onStatus) onStatus('Мост: ' + e.message + '. Пробую прокси…');
       }
     }
-    // 2) прямой fetch и прокси
-    const order = goodStrategy
-      ? [goodStrategy, ...strategies.filter(s => s !== goodStrategy)]
-      : strategies;
+    // 2) прямой fetch и прокси — повторяем весь каскад (retries + 1) раз
     let lastErr = null;
-    for (const strat of order) {
-      try {
-        if (onStatus) onStatus('Пробую: ' + strat.name + '…');
-        const json = await tryStrategy(strat, url, 15000);
-        goodStrategy = strat;
-        return json;
-      } catch (e) {
-        lastErr = e;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const order = goodStrategy
+        ? [goodStrategy, ...strategies.filter(s => s !== goodStrategy)]
+        : strategies;
+      for (const strat of order) {
+        try {
+          if (onStatus) onStatus('Пробую: ' + strat.name + (attempt ? ` (попытка ${attempt + 1})` : '') + '…');
+          const json = await tryStrategy(strat, url, timeoutMs);
+          goodStrategy = strat;
+          return json;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (attempt < retries) {
+        if (onStatus) onStatus('Прокси не ответили, повтор через 1.5 c…');
+        await delay(1500);
       }
     }
     throw new Error('Все способы загрузки не сработали (' + (lastErr && lastErr.message) +
-      '). Установите мост браузера (см. подсказку) или используйте ручной импорт.');
+      '). Используйте ручной импорт.');
   }
 
   function guildApiUrl(guildId) {

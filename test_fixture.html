@@ -84,6 +84,15 @@ for (const m of guildJson.data.members) {
         ship_galactic_power: Math.round(m.galactic_power * 0.45) });
   }
 }
+// режим сбоя: без моста и с падающим fetch к swgoh/прокси — проверяем авто-раскрытие ручного импорта
+if (location.search.includes('failguild')) {
+  const realFetch = window.fetch.bind(window);
+  window.fetch = (u, o) => {
+    const s = typeof u === 'string' ? u : (u && u.url) || '';
+    if (/swgoh\.gg|corsproxy|allorigins|codetabs/.test(s)) return Promise.reject(new Error('network blocked (test)'));
+    return realFetch(u, o);
+  };
+} else
 // эмуляция юзерскрипта-моста (swgoh_bridge.user.js): отвечает на ping и fetch
 window.addEventListener('message', ev => {
   if (!ev.data) return;
@@ -113,10 +122,9 @@ window.addEventListener('message', ev => {
   const s = document.createElement('script');
   s.src = 'js/app.js';
   s.onload = () => {
-    // ручной импорт гильдии → ростеры подгрузятся автоматически через мост
+    // автозагрузка гильдии по кнопке (мок-мост ответит) → ростеры подгрузятся автоматически
     document.getElementById('guild-url').value = 'https://swgoh.gg/g/HWTOggWMSD6t06XEYD924w/';
-    document.getElementById('manual-guild-json').value = JSON.stringify(guildJson);
-    document.getElementById('btn-manual-guild').click();
+    document.getElementById('btn-load-guild').click();
     // переключение вкладки по параметру ?tab=, фазы — ?phase=, оптимизатор — ?optimize=1
     // (импорт гильдии и автозагрузка ростеров асинхронные, поэтому ждём)
     const qs = new URLSearchParams(location.search);

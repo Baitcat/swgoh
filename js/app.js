@@ -214,6 +214,31 @@ function updateManualGuildLink() {
 }
 updateManualGuildLink();
 
+// автозагрузка гильдии через прокси/мост (с повторами); при неудаче — ручной импорт
+let guildLoading = false;
+async function loadGuildAuto() {
+  if (guildLoading) return;
+  const id = SwgohApi.parseGuildId($('#guild-url').value);
+  if (!id) { setStatus(guildStatus, '⚠ Укажите ссылку на гильдию или её ID', 'err'); return; }
+  guildLoading = true;
+  $('#btn-load-guild').disabled = true;
+  try {
+    const json = await SwgohApi.fetchJson(SwgohApi.guildApiUrl(id),
+      t => setStatus(guildStatus, t), { retries: 2, timeoutMs: 25000 });
+    applyGuild(normalizeGuild(json, id));
+    setStatus(guildStatus, 'Гильдия загружена ✔ Загружаю ростеры игроков…', 'ok');
+    loadAllRosters(); // ростеры подгружаем автоматически сразу после гильдии
+  } catch (e) {
+    setStatus(guildStatus, '⚠ ' + e.message, 'err');
+    $('#manual-import').open = true; // раскрываем ручной запас
+  } finally {
+    guildLoading = false;
+    $('#btn-load-guild').disabled = false;
+  }
+}
+$('#btn-load-guild').addEventListener('click', loadGuildAuto);
+$('#guild-url').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuildAuto(); });
+
 $('#btn-manual-guild').addEventListener('click', () => {
   try {
     const text = $('#manual-guild-json').value.trim();

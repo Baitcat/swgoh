@@ -27,17 +27,24 @@
   <section id="tab-guild" class="tab-panel active">
     <div class="card">
       <h2>Загрузка гильдии</h2>
-      <p class="muted">swgoh.gg закрыт Cloudflare, поэтому гильдия загружается вручную — это надёжно и занимает полминуты:</p>
-      <ol class="import-steps">
-        <li>Вставьте ссылку на гильдию swgoh.gg или её ID (например <code>https://swgoh.gg/g/HWTOggWMSD6t06XEYD924w/</code>):
-          <input type="text" id="guild-url" placeholder="Ссылка или ID гильдии" spellcheck="false">
-        </li>
-        <li>Откройте в новой вкладке: <a id="manual-guild-link" href="#" target="_blank" rel="noopener">ссылка на API гильдии</a></li>
-        <li>Скопируйте весь текст со страницы (Ctrl+A, Ctrl+C) и вставьте его в поле ниже</li>
-      </ol>
-      <textarea id="manual-guild-json" placeholder='{"data": {...}, "members": ...}' rows="5"></textarea>
-      <button id="btn-manual-guild" class="primary">Импортировать гильдию</button>
+      <p class="muted">Вставьте ссылку на гильдию swgoh.gg или её ID (например
+        <code>https://swgoh.gg/g/HWTOggWMSD6t06XEYD924w/</code>) и нажмите «Загрузить».
+        Данные тянутся с swgoh.gg; ростеры игроков подгрузятся автоматически.</p>
+      <div class="row">
+        <input type="text" id="guild-url" placeholder="Ссылка или ID гильдии" spellcheck="false">
+        <button id="btn-load-guild" class="primary">Загрузить гильдию</button>
+      </div>
       <div id="guild-load-status" class="status hidden"></div>
+
+      <details id="manual-import" class="manual-import">
+        <summary>Не загрузилось автоматически? Ручной импорт</summary>
+        <ol class="import-steps">
+          <li>Откройте в новой вкладке: <a id="manual-guild-link" href="#" target="_blank" rel="noopener">ссылка на API гильдии</a></li>
+          <li>Скопируйте весь текст со страницы (Ctrl+A, Ctrl+C) и вставьте его в поле ниже</li>
+        </ol>
+        <textarea id="manual-guild-json" placeholder='{"data": {...}, "members": ...}' rows="5"></textarea>
+        <button id="btn-manual-guild" class="primary">Импортировать вручную</button>
+      </details>
     </div>
 
     <div id="guild-content" class="hidden">
