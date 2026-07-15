@@ -30,9 +30,21 @@ const guildJson = {
 function playerJson(name, ally, units, gps) {
   return { data: Object.assign({ name, ally_code: ally }, gps || {}), units: units.map(u => ({ data: u })) };
 }
-// проверка синхронизации ГП: у гильдии нет разбивки по персонажам/флоту, берём из ростера
-window.__GP1 = { galactic_power: 330000000, character_galactic_power: 180000000, ship_galactic_power: 150000000 };
-window.__GP2 = { galactic_power: 285000000, character_galactic_power: 155000000, ship_galactic_power: 130000000 };
+// режим малой гильдии: ограничиваем ёмкость фазы, чтобы проверить выбор 2★ вместо 3★
+const LOWGP = location.search.includes('lowgp');
+if (LOWGP) {
+  const factor = 0.17; // сумма ~1686M → ~287M, ёмкость фазы при 90% ≈ 258M
+  for (const m of guildJson.data.members) m.galactic_power = Math.round(m.galactic_power * factor);
+  guildJson.data.galactic_power = guildJson.data.members.reduce((s, m) => s + m.galactic_power, 0);
+}
+// GP-разбивка ростеров Alpha/Bravo — согласуем с ГП участника (иначе sync перезапишет lowgp)
+function gpSplit(ally) {
+  const m = guildJson.data.members.find(x => x.ally_code === ally);
+  const g = m ? m.galactic_power : 0;
+  return { galactic_power: g, character_galactic_power: Math.round(g * 0.55), ship_galactic_power: Math.round(g * 0.45) };
+}
+window.__GP1 = gpSplit(111111111);
+window.__GP2 = gpSplit(222222222);
 // план фазы 1: Мустафар 3★ (закрыт), Корусант 1★+перенос, Кореллия 0★ →
 // в фазе 2 Фелуция (смешанный путь) должна быть 🔒 заблокирована
 if (location.search.includes('optimize')) {

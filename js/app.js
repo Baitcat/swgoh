@@ -637,18 +637,29 @@ function optimizePlan(participation) {
   const pathsArr = Object.values(PATHS); // [dark[], mixed[], light[]]
   const C = g.members.reduce((s, m) => s + m.gp, 0) * participation;
 
-  // состояние: fr — индексы фронтиров путей, bank — очки на фронтирах,
-  // stars — всего звёзд, allocs — очки по планетам за фазу, log — события
-  let beam = [{ fr: [0, 0, 0], bank: [0, 0, 0], stars: 0, allocs: [], log: [] }];
-  const BEAM = 200;
-  const score = st => {
-    let bankProg = 0;
+  // дробная ценность банка на планете (сколько звёзд он «почти» даёт)
+  const fracStars = (p, bank) => {
+    const t1 = th(p, 1), t2 = th(p, 2), t3 = th(p, 3);
+    if (bank >= t3) return 3;
+    if (bank >= t2) return 2 + (bank - t2) / (t3 - t2);
+    if (bank >= t1) return 1 + (bank - t1) / (t2 - t1);
+    return t1 ? bank / t1 : 0;
+  };
+  // потенциал состояния = взятые звёзды + прогресс банка на фронтирах.
+  // Используется для отсечения, чтобы «заготовки под будущие звёзды» не выбрасывались.
+  const potential = st => {
+    let p = st.stars;
     for (let pi = 0; pi < 3; pi++) {
       const path = pathsArr[pi];
-      if (st.fr[pi] < path.length) bankProg += Math.min(1, st.bank[pi] / th(path[st.fr[pi]], 1));
+      if (st.fr[pi] < path.length) p += fracStars(path[st.fr[pi]], st.bank[pi]);
     }
-    return st.stars * 1e6 + bankProg * 100;
+    return p;
   };
+
+  // состояние: fr — индексы фронтиров, bank — очки на фронтирах, stars — взято звёзд,
+  // alloc — очки по планетам ЭТОЙ фазы, parent — предыдущее состояние (для восстановления плана)
+  let beam = [{ fr: [0, 0, 0], bank: [0, 0, 0], stars: 0, alloc: null, parent: null }];
+  const CAP = 4000; // держим почти все различимые состояния — задача маленькая
 
   for (let f = 1; f <= 6; f++) {
     const next = [];
@@ -674,54 +685,62 @@ function optimizePlan(participation) {
       for (const tg of combos) {
         const fr = st.fr.slice(), bank = st.bank.slice();
         let stars = st.stars;
-        const alloc = {}, log = [];
-        let spent = tg.reduce((a, b) => a + b.c, 0);
-        let leftover = C - spent;
-        // остаток банкуем на копящих фронтирах, не пересекая порог 1★
+        const alloc = {};
+        let leftover = C - tg.reduce((a, b) => a + b.c, 0);
+        // остаток банкуем на копящих фронтирах, не пересекая порог 1★ (иначе планета закроется)
         const staying = open.map((o, k) => ({ o, k })).filter(x => tg[x.k].s === 0)
           .sort((a, b) => (th(a.o.p, 1) - a.o.cum) - (th(b.o.p, 1) - b.o.cum));
         const extra = {};
         for (const { o } of staying) {
           if (leftover <= 0) break;
-          // банкуем максимум до 90% порога 1★ — запас на неточность раскладки по игрокам
-          const room = Math.max(0, th(o.p, 1) * 0.9 - o.cum - (extra[o.pi] || 0));
+          const room = Math.max(0, th(o.p, 1) * 0.97 - o.cum - (extra[o.pi] || 0));
           const add = Math.min(leftover, room);
           if (add > 0) { extra[o.pi] = (extra[o.pi] || 0) + add; leftover -= add; }
         }
         for (let k = 0; k < open.length; k++) {
           const o = open[k], t = tg[k];
           if (t.s >= 1) {
-            // звёзды зафиксированы, планета закрыта, путь сдвинулся
             stars += t.s;
             fr[o.pi]++;
             bank[o.pi] = 0;
-            if (t.c > 0) alloc[o.p.key] = t.c;
-            log.push({ f, key: o.p.key, pts: t.c, star: t.s });
+            if (t.c > 0) alloc[o.p.key] = { pts: t.c, star: t.s };
           } else {
             const add = extra[o.pi] || 0;
             bank[o.pi] = o.cum + add;
-            if (add > 0) {
-              alloc[o.p.key] = add;
-              log.push({ f, key: o.p.key, pts: add, star: 0 });
-            }
+            if (add > 0) alloc[o.p.key] = { pts: add, star: 0 };
           }
         }
-        next.push({ fr, bank, stars, allocs: [...st.allocs, alloc], log: [...st.log, ...log] });
+        next.push({ fr, bank, stars, alloc, parent: st });
       }
     }
+    // дедуп по (фронтиры, банк): при равном состоянии оставляем максимум звёзд, затем потенциал
     const seen = new Map();
     for (const st of next) {
-      const sig = st.fr.join(',') + '|' + st.bank.map(x => Math.round(x / 5e6)).join(',');
-      if (!seen.has(sig) || score(st) > score(seen.get(sig))) seen.set(sig, st);
+      const sig = st.fr.join(',') + '|' + st.bank.map(x => Math.round(x / 2e6)).join(',');
+      const cur = seen.get(sig);
+      if (!cur || st.stars > cur.stars || (st.stars === cur.stars && potential(st) > potential(cur))) {
+        seen.set(sig, st);
+      }
     }
-    beam = [...seen.values()].sort((a, b) => score(b) - score(a)).slice(0, BEAM);
+    let arr = [...seen.values()];
+    if (arr.length > CAP) arr = arr.sort((a, b) => potential(b) - potential(a)).slice(0, CAP);
+    beam = arr;
   }
 
-  const best = beam[0];
+  // итог: максимум фактически взятых звёзд (банк без звезды в зачёт не идёт)
+  const best = beam.sort((a, b) => b.stars - a.stars || potential(b) - potential(a))[0];
   if (!best) return null;
+  // восстанавливаем план по фазам, идя по цепочке parent
+  const chain = [];
+  for (let s = best; s && s.alloc != null; s = s.parent) chain.unshift(s);
   const summary = [];
-  for (let f = 1; f <= 6; f++) summary.push(best.log.filter(e => e.f === f));
-  return { best, summary, totalStars: best.stars, capacity: C };
+  for (let f = 1; f <= 6; f++) {
+    const st = chain[f - 1];
+    const rows = st ? Object.entries(st.alloc).map(([key, v]) => ({ f, key, pts: v.pts, star: v.star })) : [];
+    summary.push(rows);
+  }
+  const allocs = summary.map(rows => Object.fromEntries(rows.map(r => [r.key, r.pts])));
+  return { best: { allocs, log: summary.flat() }, summary, totalStars: best.stars, capacity: C };
 }
 
 $('#btn-optimize-all').addEventListener('click', () => {
