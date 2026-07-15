@@ -61,16 +61,29 @@ const p2 = playerJson('Bravo', 222222222, [
 // прогоняем через реальный код приложения: заполняем поля ручного импорта после загрузки
 window.__TEST__ = { guildJson, players: [p1, p2] };
 
+// ростеры всех 8 игроков для проверки автозагрузки (p1/p2 — с юнитами для платунов)
+const rosterByAlly = { '111111111': p1, '222222222': p2 };
+for (const m of guildJson.data.members) {
+  if (!rosterByAlly[m.ally_code]) {
+    rosterByAlly[m.ally_code] = playerJson(m.player_name, m.ally_code,
+      [{ name: 'Darth Traya', combat_type: 1, relic_tier: 7, rarity: 7 }],
+      { galactic_power: m.galactic_power,
+        character_galactic_power: Math.round(m.galactic_power * 0.55),
+        ship_galactic_power: Math.round(m.galactic_power * 0.45) });
+  }
+}
 // эмуляция юзерскрипта-моста (swgoh_bridge.user.js): отвечает на ping и fetch
 window.addEventListener('message', ev => {
   if (!ev.data) return;
   if (ev.data.type === 'swgoh-bridge-ping') {
     window.postMessage({ type: 'swgoh-bridge-ready', version: 'test' }, '*');
   } else if (ev.data.type === 'swgoh-bridge-fetch') {
-    const ok = ev.data.url.startsWith('https://swgoh.gg/api/guild-profile/');
+    let body = guildJson;
+    const pm = ev.data.url.match(/\/api\/player\/(\d+)\//);
+    if (pm) body = rosterByAlly[pm[1]] || p1;
     window.postMessage({
       type: 'swgoh-bridge-result', id: ev.data.id,
-      status: 200, text: JSON.stringify(ok ? guildJson : p1),
+      status: 200, text: JSON.stringify(body),
     }, '*');
   }
 });
@@ -88,13 +101,12 @@ window.addEventListener('message', ev => {
   const s = document.createElement('script');
   s.src = 'js/app.js';
   s.onload = () => {
-    // автозагрузка гильдии через мост (эмулированный выше)
+    // ручной импорт гильдии → ростеры подгрузятся автоматически через мост
     document.getElementById('guild-url').value = 'https://swgoh.gg/g/HWTOggWMSD6t06XEYD924w/';
-    document.getElementById('btn-load-guild').click();
-    document.getElementById('manual-player-json').value = window.__TEST__.players.map(p => JSON.stringify(p)).join('\n');
-    document.getElementById('btn-manual-player').click();
+    document.getElementById('manual-guild-json').value = JSON.stringify(guildJson);
+    document.getElementById('btn-manual-guild').click();
     // переключение вкладки по параметру ?tab=, фазы — ?phase=, оптимизатор — ?optimize=1
-    // (загрузка гильдии через мост асинхронная, поэтому ждём)
+    // (импорт гильдии и автозагрузка ростеров асинхронные, поэтому ждём)
     const qs = new URLSearchParams(location.search);
     setTimeout(() => {
       if (qs.get('optimize')) document.getElementById('btn-optimize-all').click();

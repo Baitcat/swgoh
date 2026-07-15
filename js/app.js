@@ -223,29 +223,6 @@ function updateManualGuildLink() {
 }
 updateManualGuildLink();
 
-$('#btn-load-guild').addEventListener('click', () => loadGuild());
-$('#btn-refresh-guild').addEventListener('click', () => {
-  if (store.guild) { $('#guild-url').value = store.guild.id; }
-  loadGuild();
-});
-
-async function loadGuild() {
-  const id = SwgohApi.parseGuildId($('#guild-url').value) || (store.guild && store.guild.id);
-  if (!id) { setStatus(guildStatus, 'Не удалось распознать ID гильдии в ссылке', 'err'); return; }
-  $('#btn-load-guild').disabled = true;
-  try {
-    setStatus(guildStatus, 'Загружаю данные гильдии…');
-    const json = await SwgohApi.fetchJson(SwgohApi.guildApiUrl(id), t => setStatus(guildStatus, t));
-    applyGuild(normalizeGuild(json, id));
-    setStatus(guildStatus, 'Гильдия загружена ✔', 'ok');
-  } catch (e) {
-    setStatus(guildStatus, '⚠ ' + e.message, 'err');
-    $('#manual-import').open = true;
-  } finally {
-    $('#btn-load-guild').disabled = false;
-  }
-}
-
 $('#btn-manual-guild').addEventListener('click', () => {
   try {
     const text = $('#manual-guild-json').value.trim();
@@ -253,9 +230,9 @@ $('#btn-manual-guild').addEventListener('click', () => {
     const json = JSON.parse(splitJsonObjects(text)[0] || text);
     const id = SwgohApi.parseGuildId($('#guild-url').value);
     applyGuild(normalizeGuild(json, id));
-    setStatus(guildStatus, 'Гильдия импортирована ✔', 'ok');
+    setStatus(guildStatus, 'Гильдия импортирована ✔ Загружаю ростеры игроков…', 'ok');
     $('#manual-guild-json').value = '';
-    $('#manual-import').open = false;
+    loadAllRosters(); // ростеры подгружаем автоматически сразу после импорта
   } catch (e) {
     setStatus(guildStatus, '⚠ Не удалось разобрать JSON: ' + e.message, 'err');
   }

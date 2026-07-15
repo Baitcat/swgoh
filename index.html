@@ -27,18 +27,22 @@
   <section id="tab-guild" class="tab-panel active">
     <div class="card">
       <h2>Загрузка гильдии</h2>
-      <p class="muted">Вставьте ссылку на гильдию swgoh.gg или её ID, например:
-        <code>https://swgoh.gg/g/HWTOggWMSD6t06XEYD924w/</code></p>
-      <div class="row">
-        <input type="text" id="guild-url" placeholder="Ссылка или ID гильдии" spellcheck="false">
-        <button id="btn-load-guild" class="primary">Загрузить</button>
-      </div>
+      <p class="muted">swgoh.gg закрыт Cloudflare, поэтому гильдия загружается вручную — это надёжно и занимает полминуты:</p>
+      <ol class="import-steps">
+        <li>Вставьте ссылку на гильдию swgoh.gg или её ID (например <code>https://swgoh.gg/g/HWTOggWMSD6t06XEYD924w/</code>):
+          <input type="text" id="guild-url" placeholder="Ссылка или ID гильдии" spellcheck="false">
+        </li>
+        <li>Откройте в новой вкладке: <a id="manual-guild-link" href="#" target="_blank" rel="noopener">ссылка на API гильдии</a></li>
+        <li>Скопируйте весь текст со страницы (Ctrl+A, Ctrl+C) и вставьте его в поле ниже</li>
+      </ol>
+      <textarea id="manual-guild-json" placeholder='{"data": {...}, "members": ...}' rows="5"></textarea>
+      <button id="btn-manual-guild" class="primary">Импортировать гильдию</button>
       <div id="guild-load-status" class="status hidden"></div>
 
       <div id="bridge-hint" class="status">
         🔌 Мост браузера: <b id="bridge-state">не установлен</b>.
-        <span id="bridge-install-help">swgoh.gg закрыт Cloudflare, поэтому автозагрузка без моста почти всегда не работает.
-        Установка (один раз, ~2 минуты):
+        <span id="bridge-install-help">после импорта гильдии ростеры игроков подгружаются автоматически.
+        Чтобы это работало, установите мост (один раз, ~2 минуты) — иначе ростеры придётся вставлять вручную.
         <ol>
           <li>Поставьте расширение <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a></li>
           <li>Нажмите: <a href="swgoh_bridge.user.js">установить скрипт-мост</a> → в открывшемся окне Tampermonkey нажмите «Установить»</li>
@@ -46,17 +50,6 @@
         </ol>
         </span>
       </div>
-
-      <details id="manual-import" class="manual-import">
-        <summary>Ручной импорт (если автозагрузка не сработала)</summary>
-        <ol>
-          <li>Откройте в новой вкладке: <a id="manual-guild-link" href="#" target="_blank" rel="noopener">ссылка на API гильдии</a></li>
-          <li>Скопируйте весь текст со страницы (Ctrl+A, Ctrl+C)</li>
-          <li>Вставьте его в поле ниже и нажмите «Импортировать»</li>
-        </ol>
-        <textarea id="manual-guild-json" placeholder='{"data": {...}, "members": ...}' rows="5"></textarea>
-        <button id="btn-manual-guild" class="primary">Импортировать</button>
-      </details>
     </div>
 
     <div id="guild-content" class="hidden">
@@ -64,8 +57,7 @@
         <div class="card-head">
           <h2 id="guild-title"></h2>
           <div class="actions">
-            <button id="btn-refresh-guild" title="Обновить данные гильдии">⟳ Обновить</button>
-            <button id="btn-load-rosters" class="primary" title="Загрузить ростеры всех игроков для проверки платунов">Загрузить ростеры игроков</button>
+            <button id="btn-load-rosters" class="primary" title="Загрузить ростеры всех игроков для проверки платунов">⟳ Обновить ростеры игроков</button>
             <button id="btn-clear-all" class="danger" title="Удалить все сохранённые данные">Сбросить всё</button>
           </div>
         </div>

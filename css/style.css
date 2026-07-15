@@ -127,6 +127,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .status.ok { border-color: var(--green); }
 .status.err { border-color: var(--red); }
 
+.import-steps { margin: 10px 0; padding-left: 22px; }
+.import-steps li { margin-bottom: 8px; }
+.import-steps input[type="text"] { display: block; width: 100%; max-width: 520px; margin-top: 6px; }
+#manual-guild-json { margin-bottom: 8px; }
 .manual-import { margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 10px; }
 .manual-import summary { cursor: pointer; color: var(--accent); }
 .manual-import textarea { margin: 8px 0; }
