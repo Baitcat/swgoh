@@ -642,10 +642,14 @@ $('#btn-auto-distribute').addEventListener('click', () => {
    Для каждого фронтира перебираются цели: «копим» (0) / 1★ / 2★ / 3★;
    остаток ёмкости банкуется на копящих планетах, не пересекая порог 1★.
    Ёмкость фазы = суммарный ГП гильдии × участие (погрешность). */
-function optimizePlan(participation) {
+function optimizePlan(participation, opts = {}) {
   const g = store.guild;
   const pathsArr = Object.values(PATHS); // [dark[], mixed[], light[]]
   const C = g.members.reduce((s, m) => s + m.gp, 0) * participation;
+  // режим Ревы: держим Татуин открытым (не берём на нём звезду и не деплоим),
+  // чтобы всю оставшуюся часть ТБ можно было фармить осколки Третьей сестры
+  const reva = !!opts.reva;
+  const KEEP = 'tatooine';
 
   // дробная ценность банка на планете (сколько звёзд он «почти» даёт)
   const fracStars = (p, bank) => {
@@ -661,15 +665,19 @@ function optimizePlan(participation) {
     let p = st.stars;
     for (let pi = 0; pi < 3; pi++) {
       const path = pathsArr[pi];
-      if (st.fr[pi] < path.length) p += fracStars(path[st.fr[pi]], st.bank[pi]);
+      const fp = path[st.fr[pi]];
+      if (fp && !(reva && fp.key === KEEP)) p += fracStars(fp, st.bank[pi]); // Татуин в Рева-режиме звёзд не даёт
     }
     return p;
   };
 
   // состояние: fr — индексы фронтиров, bank — очки на фронтирах, stars — взято звёзд,
+  // revaCount — сколько фаз Татуин был открыт (для Рева-режима),
   // alloc — очки по планетам ЭТОЙ фазы, parent — предыдущее состояние (для восстановления плана)
-  let beam = [{ fr: [0, 0, 0], bank: [0, 0, 0], stars: 0, alloc: null, parent: null }];
+  let beam = [{ fr: [0, 0, 0], bank: [0, 0, 0], stars: 0, revaCount: 0, alloc: null, parent: null }];
   const CAP = 4000; // держим почти все различимые состояния — задача маленькая
+  // сравнение состояний: больше звёзд → больше фаз фарма Ревы → выше потенциал
+  const cmp = (a, b) => b.stars - a.stars || (reva ? b.revaCount - a.revaCount : 0) || potential(b) - potential(a);
 
   for (let f = 1; f <= 6; f++) {
     const next = [];
@@ -685,9 +693,12 @@ function optimizePlan(participation) {
         if (k === open.length) { combos.push(tg.slice()); return; }
         const o = open[k];
         const opts = [{ c: 0, s: 0 }];
-        for (let s = 1; s <= 3; s++) {
-          const c = th(o.p, s) - o.cum;
-          if (isFinite(c) && cost + Math.max(0, c) <= C) opts.push({ c: Math.max(0, c), s });
+        // в Рева-режиме на Татуине звезду не берём — оставляем планету открытой
+        if (!(reva && o.p.key === KEEP)) {
+          for (let s = 1; s <= 3; s++) {
+            const c = th(o.p, s) - o.cum;
+            if (isFinite(c) && cost + Math.max(0, c) <= C) opts.push({ c: Math.max(0, c), s });
+          }
         }
         for (const o2 of opts) { tg.push(o2); dfs(k + 1, cost + o2.c, tg); tg.pop(); }
       })(0, 0, []);
@@ -697,8 +708,10 @@ function optimizePlan(participation) {
         let stars = st.stars;
         const alloc = {};
         let leftover = C - tg.reduce((a, b) => a + b.c, 0);
-        // остаток банкуем на копящих фронтирах, не пересекая порог 1★ (иначе планета закроется)
-        const staying = open.map((o, k) => ({ o, k })).filter(x => tg[x.k].s === 0)
+        // остаток банкуем на копящих фронтирах, не пересекая порог 1★ (иначе планета закроется).
+        // Татуин в Рева-режиме исключаем — на него не деплоим, ёмкость идёт на тёмный/светлый пути.
+        const staying = open.map((o, k) => ({ o, k }))
+          .filter(x => tg[x.k].s === 0 && !(reva && x.o.p.key === KEEP))
           .sort((a, b) => (th(a.o.p, 1) - a.o.cum) - (th(b.o.p, 1) - b.o.cum));
         const extra = {};
         for (const { o } of staying) {
@@ -720,25 +733,25 @@ function optimizePlan(participation) {
             if (add > 0) alloc[o.p.key] = { pts: add, star: 0 };
           }
         }
-        next.push({ fr, bank, stars, alloc, parent: st });
+        // revaCount растёт, если в ЭТОЙ фазе Татуин был открыт (фронтир смешанного пути на нём)
+        const revaCount = st.revaCount + (reva && st.fr[1] === 2 ? 1 : 0);
+        next.push({ fr, bank, stars, revaCount, alloc, parent: st });
       }
     }
-    // дедуп по (фронтиры, банк): при равном состоянии оставляем максимум звёзд, затем потенциал
+    // дедуп по (фронтиры, банк): при равном состоянии оставляем лучшее по cmp
     const seen = new Map();
     for (const st of next) {
       const sig = st.fr.join(',') + '|' + st.bank.map(x => Math.round(x / 2e6)).join(',');
       const cur = seen.get(sig);
-      if (!cur || st.stars > cur.stars || (st.stars === cur.stars && potential(st) > potential(cur))) {
-        seen.set(sig, st);
-      }
+      if (!cur || cmp(st, cur) < 0) seen.set(sig, st);
     }
     let arr = [...seen.values()];
-    if (arr.length > CAP) arr = arr.sort((a, b) => potential(b) - potential(a)).slice(0, CAP);
+    if (arr.length > CAP) arr = arr.sort(cmp).slice(0, CAP);
     beam = arr;
   }
 
-  // итог: максимум фактически взятых звёзд (банк без звезды в зачёт не идёт)
-  const best = beam.sort((a, b) => b.stars - a.stars || potential(b) - potential(a))[0];
+  // итог: максимум звёзд, затем максимум фаз фарма Ревы, затем потенциал
+  const best = beam.sort(cmp)[0];
   if (!best) return null;
   // восстанавливаем план по фазам, идя по цепочке parent
   const chain = [];
@@ -750,17 +763,26 @@ function optimizePlan(participation) {
     summary.push(rows);
   }
   const allocs = summary.map(rows => Object.fromEntries(rows.map(r => [r.key, r.pts])));
-  return { best: { allocs, log: summary.flat() }, summary, totalStars: best.stars, capacity: C };
+  // фазы, в которых Татуин открыт (фронтир смешанного пути стоит на нём) → можно фармить Реву
+  let revaPhases = [];
+  if (reva) {
+    for (let f = 1; f <= 6; f++) {
+      const startFr = f === 1 ? [0, 0, 0] : (chain[f - 2] ? chain[f - 2].fr : [0, 0, 0]);
+      if (startFr[1] === 2) revaPhases.push(f); // индекс 1 = смешанный путь, 2 = Татуин
+    }
+  }
+  return { best: { allocs, log: summary.flat() }, summary, totalStars: best.stars, capacity: C, reva, revaPhases };
 }
 
-$('#btn-optimize-all').addEventListener('click', () => {
+function runOptimizer(reva) {
   const g = store.guild;
   if (!g) { alert('Сначала загрузите гильдию.'); return; }
   const hasPlan = Object.values(store.plan).some(p => Object.keys(p).length);
-  if (hasPlan && !confirm('Пересчитать оптимальный план всех 6 фаз? Текущие назначения будут заменены.')) return;
+  const modeName = reva ? 'звёзды + фарм Ревы' : 'максимум звёзд';
+  if (hasPlan && !confirm(`Пересчитать план всех 6 фаз (${modeName})? Текущие назначения будут заменены.`)) return;
 
   const part = participation();
-  const res = optimizePlan(part);
+  const res = optimizePlan(part, { reva });
   if (!res) { alert('Не удалось построить план.'); return; }
 
   /* Раскладываем игроков по целям каждой фазы (в ожидаемых очках = ГП × участие).
@@ -817,8 +839,14 @@ $('#btn-optimize-all').addEventListener('click', () => {
   box.classList.remove('hidden', 'err');
   box.classList.add('ok');
   const starStr = n => n ? '★'.repeat(n) : '—';
-  let html = `<b>Оптимальный план: ${res.totalStars} ★ из ${Object.values(PATHS).flat().length * 3}</b>` +
-    ` <span class="muted">(участие ${Math.round(part * 100)}%, ёмкость фазы ${fmtM(res.capacity)})</span><table>`;
+  let html = `<b>Оптимальный план (${modeName}): ${res.totalStars} ★ из ${Object.values(PATHS).flat().length * 3}</b>` +
+    ` <span class="muted">(участие ${Math.round(part * 100)}%, ёмкость фазы ${fmtM(res.capacity)})</span>`;
+  if (reva) {
+    html += res.revaPhases && res.revaPhases.length
+      ? `<br><span style="color:var(--green)">🗡 Татуин открыт для фарма Ревы: фазы ${res.revaPhases.join(', ')} (${res.revaPhases.length} шт.)</span>`
+      : `<br><span style="color:var(--yellow)">⚠ Не удалось открыть Татуин (не хватает ёмкости добраться до него) — фарм Ревы недоступен</span>`;
+  }
+  html += '<table>';
   for (let f = 1; f <= 6; f++) {
     const rows = res.summary[f - 1]
       .filter(r => r.pts > 0 || r.star > 0)
@@ -827,12 +855,16 @@ $('#btn-optimize-all').addEventListener('click', () => {
         return `${ALIGN_ICON[p.alignment]} ${p.displayName}: +${fmtM(r.pts)}` +
           (r.star > 0 ? ` → ${starStr(r.star)} (закрыта)` : ' (копим)');
       });
-    html += `<tr><th>Фаза ${f}</th><td>${rows.join('<br>') || '—'}</td></tr>`;
+    const revaNote = reva && res.revaPhases.includes(f) ? ' <span style="color:var(--green)">🗡 Рева</span>' : '';
+    html += `<tr><th>Фаза ${f}${revaNote}</th><td>${rows.join('<br>') || '—'}</td></tr>`;
   }
   html += '</table>';
   box.innerHTML = html;
   renderPlanner();
-});
+}
+
+$('#btn-optimize-stars').addEventListener('click', () => runOptimizer(false));
+$('#btn-optimize-reva').addEventListener('click', () => runOptimizer(true));
 
 /* --- копирование / экспорт / импорт плана --- */
 

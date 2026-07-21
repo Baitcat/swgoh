@@ -135,11 +135,11 @@ window.addEventListener('message', ev => {
     document.getElementById('guild-url').value = 'https://swgoh.gg/g/HWTOggWMSD6t06XEYD924w/';
     document.getElementById('manual-guild-json').value = JSON.stringify(guildJson);
     document.getElementById('btn-manual-guild').click();
-    // переключение вкладки по параметру ?tab=, фазы — ?phase=, оптимизатор — ?optimize=1
-    // (импорт гильдии и автозагрузка ростеров асинхронные, поэтому ждём)
+    // ?tab= — вкладка, ?phase= — фаза, ?optimize=1 — макс. звёзд, ?optimizereva=1 — звёзды+Рева
     const qs = new URLSearchParams(location.search);
     setTimeout(() => {
-      if (qs.get('optimize')) document.getElementById('btn-optimize-all').click();
+      if (qs.get('optimizereva')) document.getElementById('btn-optimize-reva').click();
+      else if (qs.get('optimize')) document.getElementById('btn-optimize-stars').click();
       const tab = qs.get('tab');
       if (tab) document.querySelector(`[data-tab="${tab}"]`).click();
       const phase = qs.get('phase');
