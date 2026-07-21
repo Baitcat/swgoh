@@ -10,6 +10,16 @@ const ALIGN_RU = { dark: 'Тёмная', light: 'Светлая', mixed: 'Сме
 const ALIGN_ICON = { dark: '🔴', light: '🔵', mixed: '🟣' };
 const PATH_LABEL = { dark: 'слева · тёмная', mixed: 'центр · смешанная', light: 'справа · светлая' };
 
+// Миссия «Третья сестра» (Рева): Татуин, фаза 3 — отряд из 5 Инквизиториума Relic 7+
+// во главе с Великим инквизитором. Награда — осколок Ревы.
+const REVA = {
+  leader: 'Grand Inquisitor',
+  units: ['Grand Inquisitor', 'Second Sister', 'Fifth Brother', 'Seventh Sister',
+    'Eighth Brother', 'Ninth Sister', 'Third Sister'],
+  relic: 7,
+  need: 5,
+};
+
 // русские названия планет
 const RU_NAMES = {
   mustafar: 'Мустафар', corellia: 'Кореллия', coruscant: 'Корусант',
@@ -1015,6 +1025,98 @@ function renderSpecials() {
   }
 }
 
+/* ---------------- Вкладка «Третья сестра» (Рева) ---------------- */
+
+function renderReva() {
+  const box = $('#reva-content');
+  box.innerHTML = '';
+  const relic = REVA.relic, need = REVA.need;
+  const leaderNN = normName(REVA.leader);
+  const unitNN = REVA.units.map(u => ({ nn: normName(u), name: u }));
+
+  box.append(el('p', { class: 'muted' },
+    `Татуин, фаза 3 (смешанный путь). Нужен отряд из ${need} персонажей Инквизиториума с Relic ${relic}+, ` +
+    `обязательно с Великим инквизитором. Награда — осколок Ревы (Третьей сестры).`));
+
+  const g = store.guild;
+  if (!g) { box.append(el('div', { class: 'status' }, 'Сначала загрузите гильдию на вкладке «Гильдия».')); return; }
+  if (!Object.keys(store.rosters).length) {
+    box.append(el('div', { class: 'status' },
+      'Ростеры игроков не загружены. Импортируйте гильдию — ростеры подтянутся автоматически.'));
+    return;
+  }
+
+  const rows = [];
+  for (const m of g.members) {
+    const r = store.rosters[m.allyCode];
+    if (!r) { rows.push({ m, loaded: false }); continue; }
+    const have = [];
+    let giRelic = null;
+    for (const u of unitNN) {
+      const rec = r.units[u.nn];
+      if (rec && rec.r >= relic) {
+        have.push(u.name);
+        if (u.nn === leaderNN) giRelic = rec.r;
+      }
+    }
+    const hasGI = giRelic != null;
+    const can = hasGI && have.length >= need;
+    rows.push({ m, loaded: true, hasGI, giRelic, have, can });
+  }
+
+  const canCount = rows.filter(r => r.can).length;
+  const loadedCount = rows.filter(r => r.loaded).length;
+  box.append(el('div', { class: 'platoon-summary' }, [
+    stat(String(canCount), 'могут проходить'),
+    stat(loadedCount + ' / ' + g.members.length, 'ростеров загружено'),
+  ]));
+
+  // сортировка: сначала кто может, затем по числу готовых инквизиторов
+  const rank = r => (r.can ? 2 : r.loaded ? 1 : 0);
+  rows.sort((a, b) => rank(b) - rank(a) ||
+    ((b.have ? b.have.length : -1) - (a.have ? a.have.length : -1)) ||
+    b.m.gp - a.m.gp);
+
+  const table = el('table', { class: 'table' });
+  table.append(el('thead', {}, el('tr', {}, [
+    el('th', {}, 'Игрок'),
+    el('th', {}, 'Великий инквизитор'),
+    el('th', { class: 'num' }, `Инквизиторов R${relic}+`),
+    el('th', {}, 'Есть (R' + relic + '+)'),
+    el('th', {}, 'Статус'),
+  ])));
+  const tbody = el('tbody');
+  for (const row of rows) {
+    const { m } = row;
+    let statusCell, giCell, cntCell, unitsCell;
+    if (!row.loaded) {
+      statusCell = el('span', { class: 'pill' }, 'ростер не загружен');
+      giCell = cntCell = unitsCell = '—';
+    } else {
+      giCell = row.hasGI ? ('R' + row.giRelic) : el('span', { class: 'pill bad' }, 'нет');
+      cntCell = String(row.have.length);
+      unitsCell = row.have.length ? row.have.join(', ') : '—';
+      if (row.can) {
+        statusCell = el('span', { class: 'pill ok' }, '✓ может');
+      } else if (!row.hasGI) {
+        statusCell = el('span', { class: 'pill bad' }, `нет Великого инквизитора R${relic}+`);
+      } else {
+        statusCell = el('span', { class: 'pill warn' }, `не хватает ${need - row.have.length} инкв.`);
+      }
+    }
+    tbody.append(el('tr', {}, [
+      el('td', {}, [m.name + ' ',
+        el('a', { href: 'https://swgoh.gg/p/' + m.allyCode + '/', target: '_blank', rel: 'noopener', class: 'muted' }, '↗')]),
+      el('td', {}, giCell),
+      el('td', { class: 'num' }, cntCell),
+      el('td', {}, unitsCell === '—' ? '—' : el('span', { class: 'who' }, unitsCell)),
+      el('td', {}, statusCell),
+    ]));
+  }
+  table.append(tbody);
+  box.append(table);
+}
+
 /* ---------------- Инициализация ---------------- */
 
 function renderAll() {
@@ -1023,6 +1125,7 @@ function renderAll() {
   renderPhases();
   renderPlanner();
   renderPlatoons();
+  renderReva();
   renderSpecials();
 }
 

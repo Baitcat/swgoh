@@ -64,11 +64,20 @@ const p1 = playerJson('Alpha', 111111111, [
   { name: 'Chimaera', combat_type: 2, rarity: 7 },
   { name: "Hound's Tooth", combat_type: 2, rarity: 7 },
   { name: 'Darth Revan', combat_type: 1, relic_tier: 7, rarity: 7 },   // R5
+  // полный отряд Инквизиториума R7 (relic_tier 9 = R7) → может проходить Реву
+  { name: 'Grand Inquisitor', combat_type: 1, relic_tier: 9, rarity: 7 },
+  { name: 'Fifth Brother', combat_type: 1, relic_tier: 9, rarity: 7 },
+  { name: 'Seventh Sister', combat_type: 1, relic_tier: 9, rarity: 7 },
+  { name: 'Eighth Brother', combat_type: 1, relic_tier: 9, rarity: 7 },
+  { name: 'Ninth Sister', combat_type: 1, relic_tier: 9, rarity: 7 },
 ], window.__GP1);
 const p2 = playerJson('Bravo', 222222222, [
   { name: 'Darth Traya', combat_type: 1, relic_tier: 7, rarity: 7 },   // R5
   { name: 'Chimaera', combat_type: 2, rarity: 6 },                      // не 7*
   { name: 'General Grievous', combat_type: 1, relic_tier: 9, rarity: 7 },
+  // есть Великий инквизитор, но всего 2 инквизитора R7 → не хватает
+  { name: 'Grand Inquisitor', combat_type: 1, relic_tier: 9, rarity: 7 },
+  { name: 'Fifth Brother', combat_type: 1, relic_tier: 9, rarity: 7 },
 ], window.__GP2);
 // прогоняем через реальный код приложения: заполняем поля ручного импорта после загрузки
 window.__TEST__ = { guildJson, players: [p1, p2] };
